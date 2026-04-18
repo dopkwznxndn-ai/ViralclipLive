@@ -58,7 +58,8 @@ app.get('/', (req, res) => res.redirect('/dashboard.html'));
 
 async function waitForTranscript(transcriptId) {
   const url = `https://api.assemblyai.com/v2/transcript/${transcriptId}`;
-  const headers = { authorization: process.env.ASSEMBLY_API_KEY };
+  // FIXED: Looking for the correct Render variable name
+  const headers = { authorization: process.env.ASSEMBLY_AI_API_KEY };
   while (true) {
     const { data } = await axios.get(url, { headers });
     if (data.status === 'completed') return {
@@ -154,16 +155,21 @@ app.post('/api/process-video', async (req, res) => {
   const cleanup  = () => tmpFiles.forEach(f => { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {} });
 
   try {
+    console.log('⬇️ Downloading audio...');
     await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" -f "bestaudio/best" -x --audio-format mp3 --extractor-args "youtube:player_client=android,web" --no-check-certificate --no-playlist -o "/tmp/audio_${id}.%(ext)s" "${originalUrl}"`, { timeout: 120000 });
 
+    console.log('⬆️ Uploading to AssemblyAI...');
     const audioData = fs.readFileSync(audioPath);
+    // FIXED: Corrected API key name
     const { data: uploadData } = await axios.post('https://api.assemblyai.com/v2/upload', audioData, {
-      headers: { authorization: process.env.ASSEMBLY_API_KEY, 'Content-Type': 'application/octet-stream' }, maxBodyLength: Infinity,
+      headers: { authorization: process.env.ASSEMBLY_AI_API_KEY, 'Content-Type': 'application/octet-stream' }, maxBodyLength: Infinity,
     });
 
+    console.log('🎙️ Transcribing...');
+    // FIXED: Corrected API key name
     const { data: transcriptData } = await axios.post('https://api.assemblyai.com/v2/transcript', {
       audio_url: uploadData.upload_url, speech_models: ['universal-2'], language_code: 'en', auto_highlights: true,
-    }, { headers: { authorization: process.env.ASSEMBLY_API_KEY } });
+    }, { headers: { authorization: process.env.ASSEMBLY_AI_API_KEY } });
 
     const { words, auto_highlights_result } = await waitForTranscript(transcriptData.id);
     const top5 = [];
@@ -194,11 +200,13 @@ app.post('/api/process-video', async (req, res) => {
 
     if (top5.length === 0) top5.push({ text: 'Highlight', rank: 0, start: 0, end: 30000, paddedStart: 0 });
 
+    console.log('⬇️ Downloading video...');
     await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" -f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --extractor-args "youtube:player_client=android,web" --no-check-certificate --no-playlist --merge-output-format mp4 -o "${videoRaw}" "${originalUrl}"`, { timeout: 300000 });
 
     if (!fs.existsSync(videoRaw) || fs.statSync(videoRaw).size === 0) throw new Error('Source video missing!');
 
     const clips = [];
+    console.log('🎬 Rendering clips...');
     for (let i = 0; i < top5.length; i++) {
       const hl = top5[i];
       const clipAssPath = `/tmp/captions_${id}_${i}.ass`;
@@ -228,6 +236,7 @@ app.post('/api/process-video', async (req, res) => {
       try {
         await execAsync(mainCmd, { timeout: 600000 });
       } catch (ffErr) {
+        console.log(`Fallback triggered for clip ${i}`);
         const fallbackVf = assHasDialogue ? `crop=ih*9/16:ih,scale=${scaleTarget}:flags=lanczos,subtitles='${clipAssPath.replace(/\\/g, '/')}':fontsdir='${FONT_DIR.replace(/\\/g, '/')}'` : `crop=ih*9/16:ih,scale=${scaleTarget}:flags=lanczos`;
         try {
           await execAsync(`"${ffmpegBin}" -ss ${start} -i "${videoRaw}" -t ${duration} -vf "${fallbackVf}" -map 0:v -map 0:a? -c:v libx264 -preset fast -crf ${encQ.crf + 3} -b:v ${encQ.videoBitrate} -pix_fmt yuv420p -c:a aac -b:a ${encQ.audioBitrate} -y "${fallbackOutPath}"`, { timeout: 300000 });
@@ -241,11 +250,12 @@ app.post('/api/process-video', async (req, res) => {
     }
 
     cleanup();
-    if (clips.length === 0) return res.status(500).json({ status: 'error', message: 'No clips generated.' });
+    if (clips.length === 0) return res.status(500).json({ status: 'error', message: 'No clips generated during final render phase.' });
     res.json({ status: 'success', transcriptId: transcriptData.id, clips });
   } catch (err) {
     cleanup();
-    res.status(500).json({ error: err.message });
+    // FIXED: Forces frontend to display the exact cause of the crash
+    res.status(500).json({ status: 'error', message: err.message, error: err.message });
   }
 });
 
@@ -329,4 +339,3 @@ function startServer(attempt = 1) {
   });
 }
 startServer();
-           
