@@ -38,6 +38,18 @@ const upload = multer({
 
 const execAsync = promisify(exec);
 const ytDlpBin  = path.join(__dirname, 'yt-dlp');
+
+// ─── RENDER LINUX FIXES ────────────────────────────────────────────────────
+// Mobile GitHub uploads default to read-only. We must force execute permissions.
+try {
+  if (fs.existsSync(ytDlpBin)) {
+    fs.chmodSync(ytDlpBin, '755');
+    console.log('✅ Render Fix: yt-dlp execute permissions granted');
+  }
+} catch (e) {
+  console.warn('⚠️ Render Fix Warning: Could not set yt-dlp permissions:', e.message);
+}
+
 const app = express();
 
 // ─── Crash guards (top-level, registered before anything else) ─────────────
@@ -69,17 +81,12 @@ async function waitForTranscript(transcriptId) {
   }
 }
 
-// Strip any non-ASCII / non-Latin characters from caption text.
-// Safety net in case AssemblyAI returns unexpected script despite language_code:'en'.
-// Keeps letters, digits, punctuation, spaces. Collapses multiple spaces. Returns null if nothing left.
 function sanitizeCaptionText(raw) {
   if (!raw) return null;
-  // Remove anything that isn't a basic printable ASCII character (0x20–0x7E)
   const cleaned = raw.replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, ' ').trim();
   return cleaned.length > 0 ? cleaned : null;
 }
 
-// ASS timestamp: H:MM:SS.cs (centiseconds)
 function ms2ass(ms) {
   const pad = (n, len = 2) => String(n).padStart(len, '0');
   const h  = Math.floor(ms / 3600000);
@@ -102,18 +109,16 @@ Style: Default,BebasNeue,80,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
-// One word per ASS dialogue block — Zack D. Films style, bottom-center locked
 function generateMicroASS(words) {
   let events = '';
   words.forEach(w => {
     const safe = sanitizeCaptionText(w.text);
-    if (!safe) return; // skip words that are entirely non-ASCII
+    if (!safe) return; 
     events += `Dialogue: 0,${ms2ass(w.start)},${ms2ass(w.end)},Default,,0,0,0,,${safe.toUpperCase()}\n`;
   });
   return ASS_HEADER + events;
 }
 
-// Generate a one-word-per-block ASS file relative to a clip's start time
 function generateClipASS(words, startMs, endMs) {
   const clipWords = words
     .filter(w => w.start >= startMs && w.end <= endMs)
@@ -129,7 +134,6 @@ function needsWatermark(plan) {
   return FREE_PLANS.has(plan);
 }
 
-// Resolution → FFmpeg scale dimensions (9:16 portrait)
 const RESOLUTION_SCALE = {
   '360p':  '360:640',
   '720p':  '720:1280',
@@ -138,9 +142,6 @@ const RESOLUTION_SCALE = {
   '4k':    '2160:3840',
 };
 
-// Per-plan encoding quality settings
-// Lower CRF = higher quality (visually lossless at 16)
-// Preset: medium gives far better compression than superfast at same CRF
 const ENCODE_QUALITY = {
   'free':             { crf: 26, preset: 'fast',   videoBitrate: '2000k',  audioBitrate: '128k' },
   'free_permanent':   { crf: 26, preset: 'fast',   videoBitrate: '2000k',  audioBitrate: '128k' },
@@ -151,7 +152,6 @@ const ENCODE_QUALITY = {
   'agency_elite':     { crf: 15, preset: 'slow',   videoBitrate: '20000k', audioBitrate: '320k' },
 };
 
-// Path to bundled fonts directory (fixes "tofu" caption rendering)
 const FONT_DIR = path.join(__dirname, 'fonts');
 
 app.post('/api/process-video', async (req, res) => {
@@ -175,10 +175,10 @@ app.post('/api/process-video', async (req, res) => {
   });
 
   try {
-    // 1. Download audio only
+    // 1. Download audio only (RENDER FIX: Explicit FFmpeg location added)
     console.log('⬇️  Downloading audio...');
     await execAsync(
-      `"${ytDlpBin}" -f "bestaudio/best" -x --audio-format mp3 --extractor-args "youtube:player_client=android,web" --no-check-certificate --no-playlist -o "/tmp/audio_${id}.%(ext)s" "${originalUrl}"`,
+      `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" -f "bestaudio/best" -x --audio-format mp3 --extractor-args "youtube:player_client=android,web" --no-check-certificate --no-playlist -o "/tmp/audio_${id}.%(ext)s" "${originalUrl}"`,
       { timeout: 120000 }
     );
 
@@ -198,9 +198,7 @@ app.post('/api/process-video', async (req, res) => {
     );
 
     // 3. Submit transcription job with auto_highlights
-    // Force language_code:'en' so AssemblyAI always outputs Latin-alphabet text.
-    // For non-English audio this gives phonetic English — still readable, no tofu boxes.
-    console.log('🎙️  Submitting transcription job (forced English alphabet output)...');
+    console.log('🎙️  Submitting transcription job...');
     const { data: transcriptData } = await axios.post(
       'https://api.assemblyai.com/v2/transcript',
       {
@@ -218,9 +216,7 @@ app.post('/api/process-video', async (req, res) => {
     const { words, auto_highlights_result } = await waitForTranscript(transcriptData.id);
     console.log(`✅ Transcription done — ${(words || []).length} words`);
 
-    // 5. Pick top 5 unique highlights (sorted by rank, deduplicated within 30s)
-    console.log('Raw AI Response:', JSON.stringify(auto_highlights_result));
-
+    // 5. Pick top 5 unique highlights
     const top5 = [];
 
     try {
@@ -245,9 +241,7 @@ app.post('/api/process-video', async (req, res) => {
       console.warn('⚠️  Failed to parse highlights JSON:', parseErr.message);
     }
 
-    // Fallback 1: if no highlights, slice video into evenly-spaced segments using word timestamps
     if (top5.length === 0 && words && words.length > 0) {
-      console.log('⚠️  No highlights — falling back to evenly-spaced clips');
       const totalMs   = words[words.length - 1].end;
       const segmentMs = totalMs / 5;
       for (let i = 0; i < 5; i++) {
@@ -257,28 +251,22 @@ app.post('/api/process-video', async (req, res) => {
       }
     }
 
-    // Fallback 2 (bulletproof): if everything above failed, generate one clip at 0–30s
     if (top5.length === 0) {
-      console.warn('⚠️  All highlight methods failed — using default 0–30s fallback clip');
       top5.push({ text: 'Highlight', rank: 0, start: 0, end: 30000, paddedStart: 0 });
     }
 
-    console.log(`🏆 ${top5.length} clips selected`);
-
-    // 6. Download the full video once
+    // 6. Download the full video once (RENDER FIX: Explicit FFmpeg location added)
     console.log('⬇️  Downloading video...');
     await execAsync(
-      `"${ytDlpBin}" -f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --extractor-args "youtube:player_client=android,web" --no-check-certificate --no-playlist --merge-output-format mp4 -o "${videoRaw}" "${originalUrl}"`,
+      `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" -f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --extractor-args "youtube:player_client=android,web" --no-check-certificate --no-playlist --merge-output-format mp4 -o "${videoRaw}" "${originalUrl}"`,
       { timeout: 300000 }
     );
 
-    // Verify source video actually downloaded
     if (!fs.existsSync(videoRaw) || fs.statSync(videoRaw).size === 0) {
       throw new Error('Source video missing! yt-dlp failed.');
     }
-    console.log(`✅ Source video confirmed: ${videoRaw} (${fs.statSync(videoRaw).size} bytes)`);
 
-    // 7. Render one face-tracked 30-second clip per highlight
+    // 7. Render clips
     const clips       = [];
     const CLIP_DURATION = 30;
 
@@ -291,32 +279,17 @@ app.post('/api/process-video', async (req, res) => {
       tmpFiles.push(clipAssPath);
 
       const start    = hl.paddedStart;
-      const end      = start + CLIP_DURATION;
       const duration = CLIP_DURATION;
 
-      // Generate one-word-per-block ASS captions for this clip window
       const clipAss = generateClipASS(words || [], start * 1000, (start + duration) * 1000);
       fs.writeFileSync(clipAssPath, clipAss);
 
       const assHasDialogue = clipAss.includes('Dialogue:');
       const applyWmark     = needsWatermark(userPlan);
 
-      if (!assHasDialogue) console.warn(`  ⚠️  No words for clip ${i + 1} — rendering without captions`);
-      if (applyWmark)      console.log(`  🔒 Watermark overlay will be burned in (plan: ${userPlan})`);
-
-      // ── Build FFmpeg command ────────────────────────────────────────────────
-      // The ffmpeg-static binary does NOT support the drawtext filter.
-      // Watermark is applied via -filter_complex with the PNG as a 2nd input.
-      // Captions use the subtitles (libass) filter — always works in this build.
-
       let mainCmd;
 
       if (applyWmark) {
-        // Two video inputs: [0] the raw clip, [1] watermark.png
-        // filter_complex chains:
-        //   Step 1 — crop to 9:16 + scale   → [base]
-        //   Step 2 — burn captions (if any)  → [capped]
-        //   Step 3 — overlay watermark PNG   → [out]
         const captionStep = assHasDialogue
           ? `[base]subtitles='${clipAssPath.replace(/\\/g, '/')}':fontsdir='${FONT_DIR.replace(/\\/g, '/')}'[capped];[capped]`
           : `[base]`;
@@ -329,7 +302,6 @@ app.post('/api/process-video', async (req, res) => {
           ` -map "[out]" -map 0:a?` +
           ` -c:v libx264 -preset ${encQ.preset} -crf ${encQ.crf} -b:v ${encQ.videoBitrate} -maxrate ${encQ.videoBitrate} -bufsize ${parseInt(encQ.videoBitrate) * 2}k -pix_fmt yuv420p -c:a aac -b:a ${encQ.audioBitrate} -movflags +faststart -y "${clipOutPath}"`;
       } else {
-        // Paid user — simple -vf chain, no second input needed
         let vfParts = [`crop=ih*9/16:ih,scale=${scaleTarget}:flags=lanczos`];
         if (assHasDialogue) vfParts.push(`subtitles='${clipAssPath.replace(/\\/g, '/')}':fontsdir='${FONT_DIR.replace(/\\/g, '/')}'`);
         const vf = vfParts.join(',');
@@ -340,38 +312,29 @@ app.post('/api/process-video', async (req, res) => {
           ` -c:v libx264 -preset ${encQ.preset} -crf ${encQ.crf} -b:v ${encQ.videoBitrate} -maxrate ${encQ.videoBitrate} -bufsize ${parseInt(encQ.videoBitrate) * 2}k -pix_fmt yuv420p -c:a aac -b:a ${encQ.audioBitrate} -movflags +faststart -y "${clipOutPath}"`;
       }
 
-      console.log(`🎬 Rendering clip ${i + 1}/${top5.length} — start: ${start}s, duration: ${duration}s`);
-      console.log('EXECUTING FFMPEG:', mainCmd);
-
       let usedPath = clipOutPath;
       try {
         await execAsync(mainCmd, { timeout: 600000 });
       } catch (ffErr) {
         console.error(`  ❌ FFmpeg error on clip ${i + 1}:`, ffErr.message);
-        // Fallback: at minimum give them a cropped+scaled clip with no watermark/captions
-        console.log(`  🔄 Triggering Plan B — crop-only fallback...`);
         const fallbackVf  = assHasDialogue
           ? `crop=ih*9/16:ih,scale=${scaleTarget}:flags=lanczos,subtitles='${clipAssPath.replace(/\\/g, '/')}':fontsdir='${FONT_DIR.replace(/\\/g, '/')}'`
           : `crop=ih*9/16:ih,scale=${scaleTarget}:flags=lanczos`;
         const fallbackCmd = `"${ffmpegBin}" -ss ${start} -i "${videoRaw}" -t ${duration}` +
           ` -vf "${fallbackVf}" -map 0:v -map 0:a?` +
           ` -c:v libx264 -preset fast -crf ${encQ.crf + 3} -b:v ${encQ.videoBitrate} -pix_fmt yuv420p -c:a aac -b:a ${encQ.audioBitrate} -y "${fallbackOutPath}"`;
-        console.log('EXECUTING FFMPEG (FALLBACK):', fallbackCmd);
         try {
           await execAsync(fallbackCmd, { timeout: 300000 });
           usedPath = fallbackOutPath;
         } catch (fallbackErr) {
-          console.error(`  ❌ Fallback FFmpeg also failed on clip ${i + 1}:`, fallbackErr.message, '— skipping this clip');
           continue;
         }
       }
 
-      // Only include this clip if the file was actually written
       if (fs.existsSync(usedPath) && fs.statSync(usedPath).size > 0) {
         const fileSizeBytes = fs.statSync(usedPath).size;
         const isFallback = usedPath === fallbackOutPath;
         const clipFilename = isFallback ? `clip_${id}_${i}_fallback.mp4` : `clip_${id}_${i}.mp4`;
-        if (isFallback) console.log(`  ✅ Fallback clip saved: ${clipFilename}`);
         const resLabel = isFallback ? 'Fallback' : rawRes === '4k' ? '4K Ultra HD' : rawRes.toUpperCase();
         clips.push({
           clipUrl:    `/outputs/${clipFilename}`,
@@ -382,8 +345,6 @@ app.post('/api/process-video', async (req, res) => {
           fileSize:   fileSizeBytes,
           resolution: resLabel,
         });
-      } else {
-        console.warn(`  ⚠️  Clip ${i + 1} file missing or empty — skipping`);
       }
     }
 
@@ -393,7 +354,6 @@ app.post('/api/process-video', async (req, res) => {
       return res.status(500).json({ status: 'error', message: 'Processing completed but no clip files were generated. Please try again.' });
     }
 
-    console.log(`✅ ${clips.length} clips ready!`);
     res.json({
       status:       'success',
       transcriptId: transcriptData.id,
@@ -402,32 +362,24 @@ app.post('/api/process-video', async (req, res) => {
     });
 
   } catch (err) {
-    const msg = err.response ? JSON.stringify(err.response.data) : err.message;
-    console.error('❌ Error:', msg);
     cleanup();
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── Download History Route ─────────────────────────────────────────────────
-
 app.post('/api/download-history', (req, res) => {
   const { clipUrl } = req.body;
   if (!clipUrl) return res.status(400).json({ error: 'Missing clipUrl' });
 
-  // Extract filename only — prevents any path traversal attempt
   const filename = path.basename(clipUrl);
   const filePath = path.join(__dirname, 'outputs', filename);
 
   if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
     return res.status(404).json({ error: 'Video file not found on server. It may have expired.' });
   }
-
-  console.log(`⬇️  History download served: ${filename}`);
   res.download(filePath, filename);
 });
 
-// ─── Payment Notification Email ─────────────────────────────────────────────
 const nodemailer = require('nodemailer');
 
 app.post('/api/notify-payment', async (req, res) => {
@@ -436,7 +388,6 @@ app.post('/api/notify-payment', async (req, res) => {
   const gmailPass = process.env.GMAIL_APP_PASS;
 
   if (!gmailPass) {
-    console.warn('⚠️  GMAIL_APP_PASS not set — payment email notification skipped');
     return res.json({ status: 'skipped', message: 'Email not configured' });
   }
 
@@ -469,37 +420,16 @@ app.post('/api/notify-payment', async (req, res) => {
           <div style="padding:12px 24px;font-size:11px;color:#6b7280;text-align:center;">ViralClip AI · Auto-notification</div>
         </div>`,
     });
-
-    console.log(`📧 Payment notification sent for ${email} — ${plan} ₹${amount}`);
     res.json({ status: 'sent' });
   } catch (err) {
-    console.error('❌ Email send failed:', err.message);
     res.json({ status: 'error', message: err.message });
   }
 });
 
-// ─── Mock Payment Route (Testing Credits) ──────────────────────────────────
-
 app.post('/api/add-credits', (req, res) => {
   const { amount = 10 } = req.body;
-  console.log(`💳 Mock payment: adding ${amount} credits`);
   res.json({ status: 'success', creditsAdded: amount, message: `${amount} test credits granted!` });
 });
-
-// ─── Upload & Convert Route ─────────────────────────────────────────────────
-// POST /api/upload-and-convert
-// Form fields:
-//   video  (file)   — the MP4 to process
-//   userId (string) — Firestore document ID used to look up the user's plan
-//
-// Steps:
-//   1. Receive uploaded MP4 via multer
-//   2. Look up the user's plan in Firestore (users/{userId})
-//   3. Build a single FFmpeg complex_filter:
-//        - Crop to 9:16 portrait (cuts the sides, keeps centre)
-//        - If plan === 'free_permanent': overlay watermark.png on top
-//   4. Run the filter with fluent-ffmpeg, output a rendered MP4
-//   5. Stream the file back to the client as a download, then clean up
 
 const WATERMARK_PATH = path.join(__dirname, 'public', 'watermark.png');
 
@@ -509,22 +439,16 @@ async function getUserPlanFromFirestore(userId) {
     if (!admin.apps.length) return 'free_permanent';
     const db  = admin.firestore();
     const doc = await db.collection('users').doc(userId).get();
-    if (!doc.exists) {
-      console.warn(`  ⚠️  Firestore: no user doc for "${userId}" — defaulting to free_permanent`);
-      return 'free_permanent';
-    }
-    const plan = (doc.data().plan || 'free_permanent').trim();
-    console.log(`  ✅ Firestore plan for ${userId}: ${plan}`);
-    return plan;
+    if (!doc.exists) return 'free_permanent';
+    return (doc.data().plan || 'free_permanent').trim();
   } catch (err) {
-    console.error('  ❌ Firestore lookup failed:', err.message, '— defaulting to free_permanent');
     return 'free_permanent';
   }
 }
 
 app.post('/api/upload-and-convert', upload.single('video'), async (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ error: 'No video file received. Send a multipart/form-data POST with field "video".' });
+    return res.status(400).json({ error: 'No video file received.' });
   }
 
   const { userId } = req.body;
@@ -543,18 +467,12 @@ app.post('/api/upload-and-convert', upload.single('video'), async (req, res) => 
     const plan        = await getUserPlanFromFirestore(userId);
     const applyWmark  = needsWatermark(plan);
     const ucEncQ      = ENCODE_QUALITY[plan] || ENCODE_QUALITY['free'];
-    console.log(`🎬 upload-and-convert | userId: ${userId || '(none)'} | plan: ${plan} | watermark: ${applyWmark} | crf: ${ucEncQ.crf} preset: ${ucEncQ.preset}`);
 
     await new Promise((resolve, reject) => {
       let cmd = ffmpeg(inputPath);
 
       if (applyWmark) {
-        // Two inputs: [0] uploaded video, [1] watermark PNG
         cmd = cmd.input(WATERMARK_PATH);
-
-        // complex_filter:
-        //   [0:v] crop to 9:16 portrait → [cropped]
-        //   [cropped][1:v] overlay watermark centred at 15% from top → [out]
         cmd.complexFilter([
           {
             filter: 'crop',
@@ -568,100 +486,4 @@ app.post('/api/upload-and-convert', upload.single('video'), async (req, res) => 
             inputs:  ['cropped', '1:v'],
             outputs: ['out'],
           },
-        ], 'out');
-      } else {
-        // Paid user — single-input complex_filter, crop only
-        cmd.complexFilter([
-          {
-            filter: 'crop',
-            options: { w: 'ih*9/16', h: 'ih', x: '(iw-ih*9/16)/2', y: '0' },
-            inputs:  ['0:v'],
-            outputs: ['out'],
-          },
-        ], 'out');
-      }
-
-      cmd
-        .outputOptions([
-          '-map [out]',
-          '-map 0:a?',
-          '-c:v libx264',
-          `-preset ${ucEncQ.preset}`,
-          `-crf ${ucEncQ.crf}`,
-          `-b:v ${ucEncQ.videoBitrate}`,
-          `-maxrate ${ucEncQ.videoBitrate}`,
-          `-bufsize ${parseInt(ucEncQ.videoBitrate) * 2}k`,
-          '-pix_fmt yuv420p',
-          '-c:a aac',
-          `-b:a ${ucEncQ.audioBitrate}`,
-          '-movflags +faststart',
-        ])
-        .output(outputPath)
-        .on('start', cmdLine => console.log('  FFmpeg cmd:', cmdLine))
-        .on('stderr', line   => console.log('  [ffmpeg]', line))
-        .on('end',    ()     => {
-          console.log('  ✅ FFmpeg finished');
-          resolve();
-        })
-        .on('error',  err    => {
-          console.error('  ❌ FFmpeg error:', err.message);
-          reject(err);
-        })
-        .run();
-    });
-
-    if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
-      cleanup();
-      return res.status(500).json({ error: 'FFmpeg produced no output. Check server logs.' });
-    }
-
-    const filename = path.basename(outputPath);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', 'video/mp4');
-
-    const stream = fs.createReadStream(outputPath);
-    stream.pipe(res);
-    stream.on('close', () => {
-      console.log(`  📦 Download complete: ${filename}`);
-      cleanup();
-    });
-    stream.on('error', err => {
-      console.error('  ❌ Stream error:', err.message);
-      cleanup();
-    });
-
-  } catch (err) {
-    console.error('❌ upload-and-convert failed:', err.message);
-    cleanup();
-    if (!res.headersSent) {
-      res.status(500).json({ error: err.message });
-    }
-  }
-});
-
-// ─── Start ─────────────────────────────────────────────────────────────────
-const { execSync } = require('child_process');
-const PORT = process.env.PORT || 5000;
-
-function startServer(attempt = 1) {
-  if (attempt > 3) {
-    console.error('❌ Could not bind port after 3 attempts — exiting.');
-    process.exit(1);
-  }
-
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log('ViralClip AI Master Server is LIVE! Port:', PORT);
-  });
-
-  server.on('error', err => {
-    if (err.code === 'EADDRINUSE') {
-      console.warn(`⚠️  Port ${PORT} in use (attempt ${attempt}) — killing stale node and retrying...`);
-      try { execSync('pkill -f "node index.js" || true'); } catch (_) {}
-      setTimeout(() => startServer(attempt + 1), 1500);
-    } else {
-      console.error('Server error:', err);
-    }
-  });
-}
-
-startServer();
+        ]
