@@ -1,0 +1,1449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — ViralClip AI</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="./style.css">
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+    <style>
+        /* ══════════════════════════════════════════
+           NAV RESPONSIVE
+        ══════════════════════════════════════════ */
+        .nav-right-group {
+            display: flex; align-items: center; gap: 10px;
+            flex-wrap: wrap; justify-content: flex-end; min-width: 0;
+        }
+        .nav-email {
+            font-size: 12px; color: var(--muted);
+            max-width: 160px; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap;
+        }
+        .nav-admin-link {
+            padding: 7px 13px; border-radius: 8px;
+            background: linear-gradient(135deg,#f59e0b,#ef4444);
+            color: #fff; font-size: 13px; font-weight: 700;
+            text-decoration: none; white-space: nowrap;
+        }
+        .nav-signout {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border-dim);
+            color: var(--muted); font-size: 13px;
+            padding: 7px 14px; white-space: nowrap;
+        }
+        #upgradeBtn { white-space: nowrap; }
+        @media (max-width: 640px) {
+            .nav-email { display: none; }
+            .plan-badge { display: none; }
+            #upgradeBtn { font-size: 12px; padding: 8px 12px; }
+            .nav-signout { font-size: 12px; padding: 7px 10px; }
+            .nav-admin-link { font-size: 12px; padding: 7px 10px; }
+        }
+
+        /* ══════════════════════════════════════════
+           STATUS BAR
+        ══════════════════════════════════════════ */
+        #statusBar {
+            background: linear-gradient(90deg, #0a0a12 0%, #0f0f1a 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 8px 5%;
+            display: flex; align-items: center; gap: 24px;
+            font-size: 12px; color: var(--muted);
+            overflow-x: auto;
+        }
+        #statusBar .sb-item { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+        #statusBar .sb-dot  { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 6px var(--success); }
+        #statusBar .sb-label { color: var(--dim); }
+        #statusBar .sb-val   { font-weight: 700; color: var(--text); }
+        #creditsBar {
+            margin-left: auto; display: flex; align-items: center; gap: 8px;
+        }
+        #creditPills { display: flex; gap: 3px; }
+        .credit-pill {
+            width: 18px; height: 6px; border-radius: 3px;
+            background: var(--primary); transition: background 0.3s;
+        }
+        .credit-pill.used { background: rgba(99,102,241,0.18); }
+        #creditCount { font-weight: 700; color: var(--primary); font-size: 13px; }
+
+        /* ══════════════════════════════════════════
+           PLAN BADGE
+        ══════════════════════════════════════════ */
+        .plan-badge { padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; margin-left: 10px; display: inline-block; box-shadow: 0 2px 5px rgba(0,0,0,0.5); }
+        .badge-free    { background: #333; color: #aaa; border: 1px solid #555; }
+        .badge-creator { background: linear-gradient(45deg, #6366f1, #a855f7); color: white; border: 1px solid #818cf8; }
+        .badge-pro     { background: linear-gradient(45deg, #f59e0b, #ea580c); color: white; border: 1px solid #fbbf24; }
+        .badge-elite   { background: linear-gradient(45deg, #eab308, #ca8a04); color: #000; border: 1px solid #fef08a; text-shadow: none; }
+
+        /* ══════════════════════════════════════════
+           HERO GENERATE CARD
+        ══════════════════════════════════════════ */
+        .hero-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 36px 32px;
+            margin-top: 32px;
+            box-shadow: 0 0 60px rgba(99,102,241,0.06);
+        }
+        .hero-card h2 {
+            font-size: 2rem; font-weight: 900; letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #fff 30%, var(--violet));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            margin-bottom: 6px;
+        }
+        .hero-card p { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+
+        .input-row { display: flex; gap: 12px; flex-wrap: wrap; }
+        .input-row input {
+            flex: 1; min-width: 0; padding: 14px 18px; border-radius: 12px;
+            border: 1px solid var(--border-dim); background: rgba(255,255,255,0.04);
+            color: var(--text); font-size: 14px; outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        @media (max-width: 480px) {
+            .input-row { flex-direction: column; }
+            .input-row input, #generateBtn { width: 100%; }
+            .hero-card { padding: 24px 18px; }
+            .hero-card h2 { font-size: 1.5rem; }
+        }
+        .input-row input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(99,102,241,0.2);
+        }
+        .input-row input::placeholder { color: var(--dim); }
+
+        #generateBtn {
+            padding: 14px 28px; border-radius: 12px; font-size: 15px; font-weight: 800;
+            background: linear-gradient(135deg, var(--primary), var(--violet));
+            color: #fff; border: none; cursor: pointer; white-space: nowrap;
+            box-shadow: 0 0 28px var(--primary-glow);
+            transition: box-shadow 0.2s, transform 0.15s, opacity 0.2s;
+        }
+        #generateBtn:hover  { box-shadow: 0 0 44px var(--primary-glow); transform: translateY(-2px); }
+        #generateBtn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+        /* ══════════════════════════════════════════
+           LOADING STATE
+        ══════════════════════════════════════════ */
+        #loadingArea { display: none; margin-top: 28px; }
+        .loader-ring {
+            width: 52px; height: 52px; margin: 0 auto 16px;
+            border-radius: 50%;
+            border: 4px solid rgba(99,102,241,0.15);
+            border-top-color: var(--primary);
+            animation: spin 0.85s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loader-title { text-align: center; font-size: 16px; font-weight: 800; margin-bottom: 4px; }
+        .loader-sub   { text-align: center; font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+
+        .steps-list { display: flex; flex-direction: column; gap: 10px; }
+        .step-row { display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-radius: 10px; background: rgba(255,255,255,0.02); border: 1px solid transparent; font-size: 13px; color: var(--dim); transition: all 0.3s; }
+        .step-row.active { border-color: var(--border); color: var(--primary); background: rgba(99,102,241,0.07); }
+        .step-row.done   { color: var(--success); background: rgba(16,185,129,0.05); }
+        .step-icon { font-size: 16px; width: 20px; text-align: center; }
+
+        /* ══════════════════════════════════════════
+           RESULTS
+        ══════════════════════════════════════════ */
+        #resultArea { display: none; margin-top: 28px; }
+        .result-header {
+            display: flex; align-items: center; gap: 12px; margin-bottom: 18px;
+        }
+        .result-header h3 { font-size: 1.3rem; font-weight: 800; }
+        .result-header .badge {
+            background: rgba(16,185,129,0.15); color: var(--success);
+            padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 700;
+            border: 1px solid rgba(16,185,129,0.3);
+        }
+
+        .clip-card {
+            background: var(--surface);
+            border: 1px solid var(--border-dim);
+            border-radius: 16px; padding: 18px 20px;
+            margin-bottom: 14px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .clip-card:hover { border-color: var(--border); box-shadow: 0 0 24px rgba(99,102,241,0.08); }
+
+        .clip-top { display: flex; align-items: flex-start; gap: 14px; }
+        .clip-num {
+            min-width: 36px; height: 36px; border-radius: 10px;
+            background: linear-gradient(135deg, var(--primary), var(--violet));
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 900; font-size: 15px; flex-shrink: 0;
+        }
+        .clip-meta { flex: 1; min-width: 0; }
+        .clip-text { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .clip-time { font-size: 12px; color: var(--dim); }
+
+        .clip-badges { display: flex; gap: 6px; margin: 10px 0; flex-wrap: wrap; }
+        .badge-pill {
+            padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700;
+            border: 1px solid; display: flex; align-items: center; gap: 4px;
+        }
+        .badge-hd    { color: #60a5fa; border-color: rgba(96,165,250,0.3); background: rgba(96,165,250,0.08); }
+        .badge-size  { color: var(--dim); border-color: rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); }
+
+        .clip-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+        .btn-dl {
+            flex: 1; padding: 10px 0; border-radius: 10px; font-size: 13px; font-weight: 800;
+            background: linear-gradient(135deg, var(--success), #059669);
+            color: #fff; text-align: center; border: none; cursor: pointer; text-decoration: none;
+            box-shadow: 0 0 18px var(--success-glow);
+            transition: box-shadow 0.2s, transform 0.15s;
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+        }
+        .btn-dl:hover { box-shadow: 0 0 30px var(--success-glow); transform: translateY(-1px); }
+
+        .share-btn {
+            width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center;
+            justify-content: center; cursor: pointer; border: 1px solid var(--border-dim);
+            background: rgba(255,255,255,0.04); text-decoration: none; transition: all 0.2s;
+            flex-shrink: 0; position: relative;
+        }
+        .share-btn:hover { border-color: var(--border); transform: translateY(-2px); }
+        .share-btn svg { width: 20px; height: 20px; }
+        .share-btn .tooltip {
+            position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+            background: #1a1b23; border: 1px solid var(--border-dim); color: var(--muted);
+            font-size: 11px; padding: 5px 10px; border-radius: 6px; white-space: nowrap;
+            pointer-events: none; opacity: 0; transition: opacity 0.2s;
+        }
+        .share-btn:hover .tooltip { opacity: 1; }
+
+        /* Instagram gradient icon */
+        .ig-icon { fill: url(#ig-grad); }
+
+        /* ══════════════════════════════════════════
+           ERROR
+        ══════════════════════════════════════════ */
+        #errorBox {
+            display: none; margin-top: 20px; padding: 14px 18px;
+            background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25);
+            border-radius: 12px; color: var(--error); font-size: 13px; font-weight: 600;
+        }
+
+        /* ══════════════════════════════════════════
+           VIDEO HISTORY
+        ══════════════════════════════════════════ */
+        .history-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 32px;
+            margin-top: 24px;
+            box-shadow: 0 0 40px rgba(99,102,241,0.04);
+        }
+        .history-card h2 {
+            font-size: 1.3rem; font-weight: 900; margin-bottom: 6px;
+            background: linear-gradient(135deg, #fff 30%, var(--violet));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .history-card p { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+
+        #historyList { display: flex; flex-direction: column; gap: 12px; }
+
+        .hist-item {
+            display: flex; align-items: center; gap: 14px;
+            background: var(--surface);
+            border: 1px solid var(--border-dim);
+            border-radius: 14px; padding: 14px 16px;
+            transition: border-color 0.2s;
+        }
+        .hist-item:hover { border-color: var(--border); }
+        .hist-thumb {
+            width: 52px; height: 52px; border-radius: 10px;
+            background: linear-gradient(135deg, rgba(99,102,241,0.18), rgba(139,92,246,0.18));
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px; flex-shrink: 0;
+        }
+        .hist-meta { flex: 1; min-width: 0; }
+        .hist-title { font-size: 13px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 3px; }
+        .hist-date  { font-size: 11px; color: var(--dim); }
+
+        .btn-hist-dl {
+            padding: 9px 16px; border-radius: 10px; font-size: 12px; font-weight: 800;
+            background: linear-gradient(135deg, var(--primary), var(--violet));
+            color: #fff; border: none; cursor: pointer; white-space: nowrap;
+            box-shadow: 0 0 14px var(--primary-glow);
+            transition: opacity 0.2s, transform 0.15s;
+            flex-shrink: 0;
+        }
+        .btn-hist-dl:hover  { opacity: 0.85; transform: translateY(-1px); }
+        .btn-hist-dl:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+        #historyEmpty { color: var(--dim); font-size: 13px; text-align: center; padding: 24px 0; }
+
+        .hist-menu-wrap { position: relative; flex-shrink: 0; }
+        .hist-menu-btn {
+            background: none; border: none; color: var(--muted); font-size: 20px;
+            cursor: pointer; padding: 4px 10px; border-radius: 8px;
+            line-height: 1; transition: background 0.15s, color 0.15s;
+        }
+        .hist-menu-btn:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+        .hist-dropdown {
+            display: none; position: absolute; right: 0; top: 36px;
+            background: #1e1f2b; border: 1px solid var(--border);
+            border-radius: 10px; padding: 6px; z-index: 500;
+            min-width: 110px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        }
+        .hist-dropdown.open { display: block; }
+        .hist-dropdown button {
+            width: 100%; padding: 9px 14px; background: #ef4444;
+            color: #fff; border: none; border-radius: 6px;
+            font-size: 13px; font-weight: 700; cursor: pointer; text-align: center;
+            transition: opacity 0.15s;
+        }
+        .hist-dropdown button:hover { opacity: 0.85; }
+
+        /* ══════════════════════════════════════════
+           TOAST NOTIFICATION
+        ══════════════════════════════════════════ */
+        #toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%) translateY(120px);
+            background: rgba(15, 15, 25, 0.92);
+            backdrop-filter: blur(12px);
+            color: #fff;
+            padding: 14px 24px;
+            border-radius: 14px;
+            font-size: 14px;
+            font-weight: 600;
+            max-width: 420px;
+            width: 90%;
+            text-align: center;
+            z-index: 99999;
+            border: 1px solid rgba(99,102,241,0.4);
+            box-shadow: 0 0 24px rgba(99,102,241,0.25);
+            transition: transform 0.4s cubic-bezier(0.34,1.56,0.64,1), opacity 0.3s;
+            opacity: 0;
+            pointer-events: none;
+        }
+        #toast.show    { transform: translateX(-50%) translateY(0); opacity: 1; }
+        #toast.error   { border-color: rgba(239,68,68,0.5);   box-shadow: 0 0 24px rgba(239,68,68,0.3); }
+        #toast.success { border-color: rgba(16,185,129,0.5);  box-shadow: 0 0 24px rgba(16,185,129,0.25); }
+
+        /* ══════════════════════════════════════════
+           WATERMARK
+        ══════════════════════════════════════════ */
+        .video-wrapper {
+            position: relative;
+            display: block;
+            border-radius: 10px;
+            margin: 10px 0;
+            background: #000;
+        }
+        .video-wrapper video {
+            width: 100%;
+            display: block;
+            border-radius: 10px;
+            margin: 0;
+            background: transparent;
+        }
+        .video-watermark {
+            position: absolute;
+            top: 15%;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 2147483647 !important;
+            pointer-events: none;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            text-align: center;
+            width: 100%;
+            user-select: none;
+        }
+        /* ══════════════════════════════════════════
+           UPGRADE BUTTON
+        ══════════════════════════════════════════ */
+        #upgradeBtn {
+            background: linear-gradient(135deg, #6366f1, #a855f7, #ec4899);
+            background-size: 200% 200%;
+            color: #fff;
+            border: none;
+            padding: 9px 18px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 800;
+            cursor: pointer;
+            letter-spacing: 0.3px;
+            animation: upgradePulse 2.4s ease-in-out infinite;
+            box-shadow: 0 0 18px rgba(168,85,247,0.45);
+            white-space: nowrap;
+        }
+        @keyframes upgradePulse {
+            0%, 100% { box-shadow: 0 0 14px rgba(168,85,247,0.4); transform: scale(1); }
+            50%       { box-shadow: 0 0 30px rgba(236,72,153,0.65); transform: scale(1.04); }
+        }
+
+        /* ══════════════════════════════════════════
+           PRICING MODAL
+        ══════════════════════════════════════════ */
+        #pricingOverlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.75);
+            backdrop-filter: blur(6px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        #pricingOverlay.open { display: flex; }
+
+        #pricingModal {
+            background: linear-gradient(160deg, #0f0f1a 0%, #13131f 100%);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 24px;
+            padding: 40px 36px;
+            width: 100%;
+            max-width: 860px;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+            box-shadow: 0 30px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(99,102,241,0.15);
+        }
+        #pricingModal h2 {
+            font-size: 1.7rem;
+            font-weight: 900;
+            text-align: center;
+            margin-bottom: 6px;
+            background: linear-gradient(135deg, #fff 30%, #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        #pricingModal .modal-sub {
+            text-align: center;
+            color: var(--muted);
+            font-size: 14px;
+            margin-bottom: 32px;
+        }
+        #modalCloseBtn {
+            position: absolute;
+            top: 16px;
+            right: 20px;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: var(--muted);
+            border-radius: 8px;
+            width: 34px;
+            height: 34px;
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+        #modalCloseBtn:hover { background: rgba(255,255,255,0.13); }
+
+        /* ── UPI Payment Modal ── */
+        #upiOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.82); backdrop-filter:blur(6px); z-index:2000; justify-content:center; align-items:center; padding:20px; }
+        #upiOverlay.open { display:flex; }
+        #upiBox { background:#13131f; border:1px solid rgba(255,255,255,0.12); border-radius:18px; padding:28px 24px; width:100%; max-width:380px; position:relative; color:#fff; }
+        #upiBox h3 { margin:0 0 4px; font-size:18px; text-align:center; }
+        #upiBox .upi-sub { text-align:center; color:#9ca3af; font-size:13px; margin-bottom:16px; }
+        .upi-step { font-size:13px; padding:9px 12px; border-radius:8px; margin-bottom:12px; }
+        .upi-step-1 { background:rgba(74,222,128,0.1); border:1px solid rgba(74,222,128,0.25); color:#4ade80; }
+        .upi-step-2 { background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25); color:#a5b4fc; }
+        .upi-qr-wrap { display:flex; flex-direction:column; align-items:center; margin:4px 0 16px; }
+        .upi-qr-img { width:190px; height:190px; border:5px solid #fff; border-radius:10px; background:#fff; box-shadow:0 0 18px rgba(168,85,247,0.3); }
+        .upi-qr-caption { margin-top:8px; font-size:12px; font-weight:600; color:#a855f7; }
+        .upi-label { display:block; font-size:12px; font-weight:700; color:#9ca3af; text-transform:uppercase; margin-bottom:6px; letter-spacing:.5px; }
+        .upi-input { width:100%; padding:11px 12px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); border-radius:8px; color:#fff; font-size:15px; box-sizing:border-box; margin-bottom:14px; outline:none; }
+        .upi-input:focus { border-color:#6366f1; }
+        .upi-submit { width:100%; padding:13px; background:linear-gradient(135deg,#6366f1,#a855f7); border:none; border-radius:8px; color:#fff; font-size:15px; font-weight:700; cursor:pointer; display:flex; justify-content:center; align-items:center; gap:8px; }
+        .upi-submit:hover { opacity:.9; }
+        .upi-submit:disabled { opacity:.55; cursor:not-allowed; }
+        .upi-lock { text-align:center; color:#6b7280; font-size:11px; margin-top:10px; }
+        #upiCloseBtn { position:absolute; top:14px; right:16px; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.1); color:#9ca3af; border-radius:7px; width:30px; height:30px; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+        #upiCloseBtn:hover { background:rgba(255,255,255,0.13); }
+
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 18px;
+        }
+        @media (max-width: 600px) { .pricing-grid { grid-template-columns: 1fr; } }
+
+        .price-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 18px;
+            padding: 26px 22px;
+            position: relative;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .price-card:hover { transform: translateY(-3px); }
+
+        /* Creator — highlighted */
+        .price-card.highlight {
+            border-color: rgba(168,85,247,0.55);
+            background: rgba(99,102,241,0.07);
+            box-shadow: 0 0 34px rgba(168,85,247,0.2);
+        }
+        .badge-popular {
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 800;
+            padding: 3px 14px;
+            border-radius: 20px;
+            white-space: nowrap;
+            letter-spacing: 0.5px;
+        }
+
+        /* Agency Elite — gold */
+        .price-card.gold {
+            border-color: rgba(234,179,8,0.45);
+            background: rgba(234,179,8,0.04);
+            box-shadow: 0 0 28px rgba(234,179,8,0.12);
+        }
+        .price-card.gold .price-name { color: #f59e0b; }
+        .price-card.gold .plan-btn { background: linear-gradient(135deg, #d97706, #f59e0b); box-shadow: 0 0 18px rgba(245,158,11,0.35); }
+        .price-card.gold .plan-btn:hover { box-shadow: 0 0 30px rgba(245,158,11,0.5); }
+
+        .price-name {
+            font-size: 15px;
+            font-weight: 800;
+            color: var(--text);
+            margin-bottom: 4px;
+        }
+        .price-amount {
+            font-size: 2rem;
+            font-weight: 900;
+            color: #fff;
+            line-height: 1;
+            margin-bottom: 4px;
+        }
+        .price-amount span { font-size: 14px; font-weight: 500; color: var(--muted); }
+        .price-features {
+            list-style: none;
+            padding: 0;
+            margin: 16px 0 22px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .price-features li {
+            font-size: 13px;
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .price-features li::before {
+            content: '✓';
+            color: #a855f7;
+            font-weight: 900;
+            flex-shrink: 0;
+        }
+        .price-card.gold .price-features li::before { color: #f59e0b; }
+
+        .plan-btn {
+            width: 100%;
+            padding: 12px;
+            border-radius: 12px;
+            border: none;
+            font-size: 14px;
+            font-weight: 800;
+            cursor: pointer;
+            transition: box-shadow 0.2s, transform 0.15s, opacity 0.2s;
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            color: #fff;
+            box-shadow: 0 0 18px rgba(99,102,241,0.35);
+        }
+        .plan-btn:hover { box-shadow: 0 0 30px rgba(99,102,241,0.55); transform: translateY(-1px); }
+        .plan-btn:disabled { background: rgba(255,255,255,0.07); color: var(--muted); cursor: not-allowed; box-shadow: none; transform: none; }
+
+        .watermark {
+            position: absolute;
+            top: 65%;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 16px;
+            font-weight: 700;
+            color: rgba(255,255,255,0.5);
+            pointer-events: none;
+            white-space: nowrap;
+            text-shadow: 1px 1px 6px rgba(0,0,0,0.85), 0 0 12px rgba(0,0,0,0.6);
+            user-select: none;
+            z-index: 10;
+        }
+
+        /* ── Floating Support Button ── */
+        .email-float {
+            position: fixed;
+            width: 60px;
+            height: 60px;
+            bottom: 40px;
+            right: 40px;
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            color: #FFF;
+            border-radius: 50px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4);
+            z-index: 10000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: all 0.3s ease;
+            text-decoration: none;
+        }
+        .email-float:hover {
+            transform: translateY(-5px) scale(1.05);
+            box-shadow: 0 8px 25px rgba(168, 85, 247, 0.6);
+        }
+        .vc-footer {
+            background-color: #0f0f13;
+            border-top: 1px solid rgba(168, 85, 247, 0.2);
+            padding: 1.5rem 1rem;
+            text-align: center;
+            font-family: inherit;
+            width: 100%;
+            margin-top: 40px;
+        }
+        .footer-content {
+            max-width: 800px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            align-items: center;
+        }
+        .footer-content p {
+            color: #888;
+            font-size: 0.85rem;
+            margin: 0;
+        }
+        .footer-links {
+            display: flex;
+            gap: 1.5rem;
+            justify-content: center;
+        }
+        .footer-link {
+            color: #ccc;
+            text-decoration: none;
+            font-size: 0.85rem;
+            transition: all 0.3s ease;
+        }
+        .footer-link:hover {
+            color: #a855f7;
+            text-shadow: 0 0 10px rgba(168, 85, 247, 0.4);
+        }
+
+    </style>
+</head>
+<body>
+    <div id="toast"></div>
+
+    <!-- ── Nav ── -->
+    <nav>
+        <div class="logo">ViralClip <span>AI</span></div>
+        <div class="nav-right-group">
+            <span id="userEmail" class="nav-email"></span>
+            <span id="currentPlanBadge" class="plan-badge badge-free">Loading...</span>
+            <a id="adminPanelLink" href="./admin.html" class="nav-admin-link" style="display:none;">⚙️ Admin</a>
+            <button id="upgradeBtn">👑 Upgrade</button>
+            <button id="signOutBtn" class="btn nav-signout">Sign Out</button>
+        </div>
+    </nav>
+
+    <!-- ── Status Bar ── -->
+    <div id="statusBar">
+        <div class="sb-item"><div class="sb-dot"></div><span class="sb-label">System</span><span class="sb-val">Online</span></div>
+        <div class="sb-item"><span class="sb-label">Quality</span><span class="sb-val">1080p HD · 30s Clips</span></div>
+        <div class="sb-item"><span class="sb-label">AI Engine</span><span class="sb-val">AssemblyAI + Face-Track</span></div>
+        <div id="creditsBar">
+            <span class="sb-label">Credits</span>
+            <div id="creditPills"></div>
+            <span id="creditCount"></span>
+        </div>
+    </div>
+
+    <!-- ── Main ── -->
+    <div class="container">
+        <div class="hero-card" id="generateSection">
+            <h2>⚡ Generate Viral Clips</h2>
+            <p>Paste any YouTube link · AI picks the top 5 moments · Downloads as 1080p 9:16 Shorts</p>
+
+            <div class="input-row">
+                <input type="text" id="videoUrlInput" placeholder="https://youtube.com/watch?v=...">
+                <button id="generateBtn">⚡ Generate</button>
+            </div>
+
+            <!-- Loading -->
+            <div id="loadingArea">
+                <div class="loader-ring"></div>
+                <div class="loader-title">Processing HD Video</div>
+                <div class="loader-sub">This takes 2–4 minutes · Don't close this tab</div>
+                <div class="steps-list">
+                    <div class="step-row" id="s1"><span class="step-icon">⬇️</span> Downloading &amp; extracting audio</div>
+                    <div class="step-row" id="s2"><span class="step-icon">🎙️</span> Transcribing with AssemblyAI</div>
+                    <div class="step-row" id="s3"><span class="step-icon">🏆</span> Selecting top highlight moments</div>
+                    <div class="step-row" id="s4"><span class="step-icon">🎯</span> Face-tracking &amp; rendering HD clips</div>
+                    <div class="step-row" id="s5"><span class="step-icon">✅</span> Finalising &amp; packaging files</div>
+                </div>
+            </div>
+
+            <!-- Error -->
+            <div id="errorBox"></div>
+
+            <!-- Results -->
+            <div id="resultArea">
+                <div class="result-header">
+                    <h3>🎉 Your Clips Are Ready</h3>
+                    <span class="badge" id="clipCountBadge"></span>
+                </div>
+                <div id="clipsGrid"></div>
+            </div>
+        </div>
+
+        <!-- Video History -->
+        <div class="history-card" id="historySection">
+            <h2>📼 Video History</h2>
+            <p>Your previously generated clips · Each download costs 1 credit</p>
+            <div id="historyList">
+                <div id="historyEmpty">No videos yet — generate your first clip above!</div>
+            </div>
+        </div>
+    </div><!-- /.container -->
+
+    <!-- ── UPI Payment Modal ── -->
+    <div id="upiOverlay">
+        <div id="upiBox">
+            <button id="upiCloseBtn" onclick="closeUpiModal()">✕</button>
+            <h3 id="upiTitle">Complete UPI Payment</h3>
+            <p class="upi-sub" id="upiSub">Scan the QR or use the UPI ID below</p>
+            <div class="upi-step upi-step-1">
+                <strong>Step 1:</strong> Pay <strong id="upiPrice">₹99</strong> to UPI: <strong>viralclipaistudio@okhdfcbank</strong>
+            </div>
+            <div class="upi-qr-wrap">
+                <img id="upiQR" src="" alt="UPI QR Code" class="upi-qr-img">
+                <span class="upi-qr-caption" id="upiCaption">Scan to pay</span>
+            </div>
+            <div class="upi-step upi-step-2">
+                <strong>Step 2:</strong> Paste your UTR / Transaction ID below so we can verify.
+            </div>
+            <label class="upi-label">UTR / Transaction ID</label>
+            <input type="text" class="upi-input" id="upiUtrInput" placeholder="e.g., 123456789012" maxlength="64">
+            <button class="upi-submit" id="upiSubmitBtn" onclick="submitUpiUTR()">
+                <span id="upiSubmitText">Submit UTR for Verification</span>
+            </button>
+            <p class="upi-lock">🔒 Your transaction ID is stored securely</p>
+            <p style="text-align:center; color:#9ca3af; font-size:11px; margin-top:8px; line-height:1.5;">Currently accepting UPI payments only (India).<br>International cards coming soon!</p>
+            <div id="upiSuccess" style="display:none; text-align:center; padding:10px 0;">
+                <div style="font-size:44px; margin-bottom:12px;">✅</div>
+                <h3 style="color:#4ade80; margin-bottom:8px;">UTR Submitted!</h3>
+                <p style="color:#9ca3af; font-size:13px; line-height:1.6;">Our team will verify your payment within a few hours and unlock your plan.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden SVG defs for gradient icons -->
+    <svg width="0" height="0" style="position:absolute">
+        <defs>
+            <linearGradient id="ig-grad" x1="0%" y1="100%" x2="100%" y2="0%">
+                <stop offset="0%"   stop-color="#f09433"/>
+                <stop offset="25%"  stop-color="#e6683c"/>
+                <stop offset="50%"  stop-color="#dc2743"/>
+                <stop offset="75%"  stop-color="#cc2366"/>
+                <stop offset="100%" stop-color="#bc1888"/>
+            </linearGradient>
+        </defs>
+    </svg>
+
+    <!-- ── Pricing Modal ── -->
+    <div id="pricingOverlay">
+        <div id="pricingModal">
+            <button id="modalCloseBtn">✕</button>
+            <h2>Choose Your Plan</h2>
+            <p class="modal-sub">Unlock more credits, higher quality, and zero watermarks.</p>
+
+            <div class="pricing-grid">
+
+                <!-- Free -->
+                <div class="price-card">
+                    <div class="price-name">Free</div>
+                    <div class="price-amount">₹0 <span>/ forever</span></div>
+                    <ul class="price-features">
+                        <li>1 Video / Credit per day</li>
+                        <li>720p Standard Resolution</li>
+                        <li>ViralClip AI Watermark</li>
+                        <li>Standard Queue</li>
+                    </ul>
+                    <button class="plan-btn" disabled>Current Plan</button>
+                </div>
+
+                <!-- Creator (Highlighted) -->
+                <div class="price-card highlight">
+                    <div class="badge-popular">⭐ Most Popular</div>
+                    <div class="price-name">Creator</div>
+                    <div class="price-amount">₹99 <span style="font-size:13px;color:#888;">~$1.19 USD</span><span>/ month</span></div>
+                    <ul class="price-features">
+                        <li>2 Videos / Credits per day</li>
+                        <li>1080p High Quality</li>
+                        <li>No Watermarks</li>
+                        <li>Priority Queue</li>
+                    </ul>
+                    <button class="plan-btn" onclick="openUpiModal('Creator', 99)">Upgrade for ₹99</button>
+                </div>
+
+                <!-- Pro Studio -->
+                <div class="price-card">
+                    <div class="price-name">Pro Studio</div>
+                    <div class="price-amount">₹199 <span style="font-size:13px;color:#888;">~$2.39 USD</span><span>/ month</span></div>
+                    <ul class="price-features">
+                        <li>3 Videos / Credits per day</li>
+                        <li>1440p (2K) Resolution</li>
+                        <li>No Watermarks</li>
+                        <li>Priority Queue</li>
+                    </ul>
+                    <button class="plan-btn" onclick="openUpiModal('Pro Studio', 199)">Get Pro for ₹199</button>
+                </div>
+
+                <!-- Agency Elite (Gold) -->
+                <div class="price-card gold">
+                    <div class="price-name">Agency Elite</div>
+                    <div class="price-amount">₹399 <span style="font-size:13px;color:#888;">~$4.79 USD</span><span>/ month</span></div>
+                    <ul class="price-features">
+                        <li>5 Videos / Credits per day</li>
+                        <li>4K Ultra HD Resolution</li>
+                        <li>No Watermarks</li>
+                        <li>Full Commercial Rights</li>
+                    </ul>
+                    <button class="plan-btn" onclick="openUpiModal('Agency Elite', 399)">Go Elite for ₹399</button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ── Firebase ──
+        const firebaseConfig = {
+          apiKey: "AIzaSyBpNdos_eIDIhgvpTsgEEFEVX8nS6d2y-E",
+          authDomain: "viralclipai-418f6.firebaseapp.com",
+          projectId: "viralclipai-418f6",
+          storageBucket: "viralclipai-418f6.firebasestorage.app",
+          messagingSenderId: "389107980652",
+          appId: "1:389107980652:web:f1add75fff14026364fb49"
+        };
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db   = firebase.firestore();
+
+        // ── Toast Notification System ──
+        let _toastTimer = null;
+        function showNotification(message, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'show ' + (isError ? 'error' : 'success');
+            clearTimeout(_toastTimer);
+            _toastTimer = setTimeout(() => { toast.className = ''; }, 4000);
+        }
+
+        let currentUid  = null;
+        let userCredits = 0;
+        let isPremium   = false;
+        let isAdmin     = false;
+        let userPlan    = 'free';
+        const ADMIN_EMAILS  = ['viralclipaistudio@gmail.com'];
+
+        // Single source of truth for every plan's features
+        const PLAN_CONFIG = {
+            'free':           { credits: 1, period: 'daily', resolution: '720p',  label: 'Free Tier',       badgeCls: 'badge-free',    paid: false },
+            'free_permanent': { credits: 1, period: 'daily', resolution: '720p',  label: 'Free Tier',       badgeCls: 'badge-free',    paid: false },
+            'creator':        { credits: 2, period: 'daily', resolution: '1080p', label: 'Creator 👑',      badgeCls: 'badge-creator', paid: true  },
+            '99rs_permanent': { credits: 2, period: 'daily', resolution: '1080p', label: 'Creator 👑',      badgeCls: 'badge-creator', paid: true  },
+            'pro_studio':     { credits: 3, period: 'daily', resolution: '1440p', label: 'Pro Studio ⚡',   badgeCls: 'badge-pro',     paid: true  },
+            '199rs_permanent':{ credits: 3, period: 'daily', resolution: '1440p', label: 'Pro Studio ⚡',   badgeCls: 'badge-pro',     paid: true  },
+            'agency_elite':   { credits: 5, period: 'daily', resolution: '4k',    label: 'Agency Elite 💎', badgeCls: 'badge-elite',   paid: true  },
+        };
+        const DEFAULT_PLAN  = PLAN_CONFIG['free'];
+        function getPlanCfg(plan) { return PLAN_CONFIG[plan] || DEFAULT_PLAN; }
+
+        // ── Accounts to force-reset to free plan on every login ──
+        const FREE_RESET_EMAILS = new Set([
+            'shravannoobda1@gmail.com',
+            'shravankumar4242626@gmail.com',
+            'shsusshsuudusus@gmail.com',
+        ]);
+
+        // ── Stamp free plan into Firestore on every login for reset accounts ──
+        async function maybeStampSeedAccount(u) {
+            if (!FREE_RESET_EMAILS.has(u.email)) return;
+            const todayStr = new Date().toISOString().slice(0, 10);
+            const monthStr = new Date().toISOString().slice(0, 7);
+            const ref = db.collection('users').doc(u.uid);
+            await ref.set({
+                plan:               'free',
+                credits:            1,
+                tier:               'free',
+                last_reset_date:    todayStr,
+                last_monthly_reset: monthStr,
+                updatedAt:          firebase.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+        }
+
+        auth.onAuthStateChanged(async u => {
+            if (!u) return window.location.href = './signin.html';
+            currentUid = u.uid;
+            isAdmin    = ADMIN_EMAILS.includes(u.email);
+            document.getElementById('userEmail').textContent = u.email || u.displayName || '';
+            if (isAdmin) document.getElementById('adminPanelLink').style.display = 'inline-flex';
+            await maybeStampSeedAccount(u);
+            await initUserAndCredits(u.uid);
+            loadHistory(u.uid);
+            // ── Log login activity ──
+            try {
+                await db.collection('activity_logs').add({
+                    uid:       u.uid,
+                    email:     u.email || '',
+                    event:     'login',
+                    page:      'dashboard',
+                    userAgent: navigator.userAgent,
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                });
+            } catch(e) {}
+        });
+
+        // ── Daily Drip: read / reset credits from Firestore ──
+        async function initUserAndCredits(uid) {
+            const ref      = db.collection('users').doc(uid);
+            const snap     = await ref.get();
+            const todayStr = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+
+            // ── Plan badge helper ──
+            function updatePlanBadge(plan) {
+                const badge = document.getElementById('currentPlanBadge');
+                if (!badge) return;
+                const cfg = getPlanCfg(plan);
+                badge.textContent = cfg.label;
+                badge.className   = 'plan-badge ' + cfg.badgeCls;
+            }
+
+            const monthStr = new Date().toISOString().slice(0, 7); // "YYYY-MM"
+
+            // ── Admin God Mode ──
+            if (isAdmin) {
+                isPremium   = true;
+                userPlan    = 'agency_elite';
+                userCredits = getPlanCfg('agency_elite').credits;
+                renderCredits();
+                updatePlanBadge('agency_elite');
+                const upgBtn = document.getElementById('upgradeBtn');
+                if (upgBtn) upgBtn.style.display = 'none';
+                return;
+            }
+
+            if (!snap.exists) {
+                const freeCfg = getPlanCfg('free');
+                await ref.set({
+                    credits:          freeCfg.credits,
+                    last_reset_date:  todayStr,
+                    last_monthly_reset: monthStr,
+                    plan:             'free',
+                    createdAt:        firebase.firestore.FieldValue.serverTimestamp(),
+                });
+                userCredits = freeCfg.credits;
+                isPremium   = false;
+            } else {
+                const data = snap.data();
+                userPlan = data.plan || 'free';
+
+                // Seed accounts carry an explicit `tier` that overrides plan for feature gating
+                const effectiveTier = data.tier || userPlan;
+                if (data.tier) userPlan = data.tier;
+
+                const cfg = getPlanCfg(userPlan);
+                isPremium = cfg.paid === true;
+
+                const isPermanent = data.last_reset_date === 'permanent';
+                if (isPermanent) {
+                    // Seed accounts — show ∞, never reset
+                    userCredits = 999999;
+                } else {
+                    // All plans reset daily
+                    if (data.last_reset_date !== todayStr) {
+                        userCredits = cfg.credits;
+                        await ref.update({ credits: userCredits, last_reset_date: todayStr });
+                    } else {
+                        userCredits = typeof data.credits === 'number' ? data.credits : cfg.credits;
+                    }
+                }
+            }
+            renderCredits();
+            updatePlanBadge(userPlan);
+
+            // Hide upgrade button only for top-tier (Agency Elite) — all others can still upgrade
+            const upgradeBtn = document.getElementById('upgradeBtn');
+            if (upgradeBtn) upgradeBtn.style.display = (userPlan === 'agency_elite') ? 'none' : '';
+        }
+        document.getElementById('signOutBtn').addEventListener('click', () =>
+            auth.signOut().then(() => window.location.href = './signin.html')
+        );
+
+        // ── History helpers ──
+        function fmtDate(ts) {
+            if (!ts) return '';
+            const d = ts.toDate ? ts.toDate() : new Date(ts);
+            return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+
+        async function saveClipsToHistory(uid, clips, sourceUrl) {
+            const batch = db.batch();
+            clips.forEach(clip => {
+                const ref = db.collection('users').doc(uid).collection('history').doc();
+                batch.set(ref, {
+                    clipUrl:   clip.clipUrl,
+                    text:      clip.text || 'Highlight',
+                    start:     clip.start || 0,
+                    end:       clip.end   || 0,
+                    fileSize:  clip.fileSize || 0,
+                    resolution: clip.resolution || '1080p HD',
+                    sourceUrl: sourceUrl || '',
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                });
+            });
+            await batch.commit();
+        }
+
+        async function loadHistory(uid) {
+            const list = document.getElementById('historyList');
+            const empty = document.getElementById('historyEmpty');
+            try {
+                const snap = await db.collection('users').doc(uid).collection('history')
+                    .orderBy('createdAt', 'desc').limit(50).get();
+
+                if (snap.empty) { empty.style.display = 'block'; return; }
+                empty.style.display = 'none';
+
+                // Remove old items (keep the empty placeholder node)
+                list.querySelectorAll('.hist-item').forEach(el => el.remove());
+
+                snap.forEach(doc => {
+                    const d      = doc.data();
+                    const docId  = doc.id;
+                    const menuId = 'hmenu-' + docId;
+                    const item   = document.createElement('div');
+                    item.className     = 'hist-item';
+                    item.dataset.docId = docId;
+                    item.innerHTML = `
+                        <div class="hist-thumb">🎬</div>
+                        <div class="hist-meta">
+                            <div class="hist-title">${d.text || 'Clip'}</div>
+                            <div class="hist-date">${fmtDate(d.createdAt)} · ${d.resolution || '1080p HD'} · ${fmtSize(d.fileSize)}</div>
+                        </div>
+                        <button class="btn-hist-dl" data-url="${d.clipUrl}">⬇ Download (1 Credit)</button>
+                        <div class="hist-menu-wrap">
+                            <button class="hist-menu-btn" data-menu="${menuId}" title="More options">⋮</button>
+                            <div class="hist-dropdown" id="${menuId}">
+                                <button data-delete="${docId}">🗑 Delete</button>
+                            </div>
+                        </div>
+                    `;
+                    item.querySelector('.btn-hist-dl').addEventListener('click', handleHistoryDownload);
+                    item.querySelector('.hist-menu-btn').addEventListener('click', e => {
+                        e.stopPropagation();
+                        toggleHistMenu(menuId);
+                    });
+                    item.querySelector('[data-delete]').addEventListener('click', e => {
+                        e.stopPropagation();
+                        deleteHistoryItem(currentUid, docId, item);
+                    });
+                    list.appendChild(item);
+                });
+            } catch (e) {
+                console.warn('History load error:', e.message);
+            }
+        }
+
+        // ── 3-dots menu helpers ──
+        function toggleHistMenu(menuId) {
+            const target = document.getElementById(menuId);
+            const isOpen = target.classList.contains('open');
+            // close every open dropdown first
+            document.querySelectorAll('.hist-dropdown.open').forEach(m => m.classList.remove('open'));
+            if (!isOpen) target.classList.add('open');
+        }
+
+        // Close any open dropdown when clicking outside a history item
+        document.addEventListener('click', () => {
+            document.querySelectorAll('.hist-dropdown.open').forEach(m => m.classList.remove('open'));
+        });
+
+        async function deleteHistoryItem(uid, docId, itemEl) {
+            if (!uid || !docId) return;
+            // Optimistic UI — remove immediately
+            itemEl.style.transition = 'opacity 0.25s, transform 0.25s';
+            itemEl.style.opacity    = '0';
+            itemEl.style.transform  = 'translateX(30px)';
+            setTimeout(() => itemEl.remove(), 250);
+
+            // Check if list is now empty
+            const list = document.getElementById('historyList');
+            if (!list.querySelector('.hist-item')) {
+                document.getElementById('historyEmpty').style.display = 'block';
+            }
+
+            // Delete from Firestore
+            try {
+                await db.collection('users').doc(uid).collection('history').doc(docId).delete();
+                showNotification('Clip deleted.', false);
+            } catch (err) {
+                showNotification('Delete failed: ' + err.message, true);
+                // Reload to re-show the item
+                loadHistory(uid);
+            }
+        }
+
+        async function handleHistoryDownload(e) {
+            const btn    = e.currentTarget;
+            const clipUrl = btn.dataset.url;
+
+            if (getCredits() <= 0) {
+                showNotification('No credits remaining — upgrade your plan to download more clips!', true);
+                return;
+            }
+
+            btn.disabled    = true;
+            btn.textContent = 'Downloading…';
+
+            try {
+                const res = await fetch('/api/download-history', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ clipUrl }),
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.error || 'Download failed');
+                }
+
+                // Deduct credit and trigger browser download
+                await spendCredit();
+                renderCredits();
+
+                const blob = await res.blob();
+                const a    = document.createElement('a');
+                a.href     = URL.createObjectURL(blob);
+                a.download = clipUrl.split('/').pop();
+                a.click();
+                URL.revokeObjectURL(a.href);
+            } catch (err) {
+                showNotification('Download error: ' + err.message, true);
+            } finally {
+                btn.disabled    = false;
+                btn.textContent = '⬇ Download (1 Credit)';
+            }
+        }
+
+        // ── Force Blob Download (Android / Gmail-open fix) ──
+        async function forceBlobDownload(url, filename) {
+            try {
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('Network response was not ok');
+                const blob = await res.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = filename || 'clip.mp4';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => { URL.revokeObjectURL(blobUrl); a.remove(); }, 1000);
+            } catch (err) {
+                showNotification('Download failed: ' + err.message, true);
+            }
+        }
+
+        // ── Credit system (Firestore-backed) ──
+        function getCredits() { return userCredits; }
+
+        async function spendCredit() {
+            userCredits = Math.max(0, userCredits - 1);
+            if (currentUid && userCredits < 999999) {
+                await db.collection('users').doc(currentUid).update({ credits: userCredits });
+            }
+        }
+
+        function renderCredits() {
+            const pills = document.getElementById('creditPills');
+            pills.innerHTML = '';
+            if (userCredits >= 999999) {
+                document.getElementById('creditCount').textContent = '∞ Unlimited';
+                return;
+            }
+            const cfg   = getPlanCfg(userPlan);
+            const total = cfg.credits;
+            const pill_limit = Math.min(total, 10); // max 10 visual pills
+            for (let i = 0; i < pill_limit; i++) {
+                const d = document.createElement('div');
+                const threshold = Math.floor((userCredits / total) * pill_limit);
+                d.className = 'credit-pill' + (i >= threshold ? ' used' : '');
+                pills.appendChild(d);
+            }
+            const period = cfg.period === 'monthly' ? 'mo' : 'day';
+            document.getElementById('creditCount').textContent = `${userCredits} / ${total} per ${period}`;
+        }
+
+        // ── Helpers ──
+        function fmtTime(ms) {
+            const s = Math.floor(ms / 1000);
+            return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+        }
+        function fmtSize(bytes) {
+            if (!bytes) return '—';
+            if (bytes >= 1e9) return (bytes/1e9).toFixed(1) + ' GB';
+            return (bytes/1e6).toFixed(1) + ' MB';
+        }
+
+        const STEPS = ['s1','s2','s3','s4','s5'];
+        function setStep(active) {
+            STEPS.forEach((id, i) => {
+                const el = document.getElementById(id);
+                el.className = 'step-row' + (i < active ? ' done' : i === active ? ' active' : '');
+            });
+        }
+
+        // ── Icons ──
+        const ICON_DL = `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v9.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L9 12.586V3a1 1 0 011-1zM4 15a1 1 0 011 1h10a1 1 0 110 2H5a1 1 0 01-1-1v-1a1 1 0 011-1z"/></svg>`;
+
+        const ICON_IG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <rect width="24" height="24" rx="6" fill="url(#ig-grad)" opacity="0.15"/>
+            <path class="ig-icon" d="M12 7.2A4.8 4.8 0 1 0 16.8 12 4.806 4.806 0 0 0 12 7.2Zm0 7.92A3.12 3.12 0 1 1 15.12 12 3.124 3.124 0 0 1 12 15.12ZM17.04 6a1.12 1.12 0 1 0 1.12 1.12A1.122 1.122 0 0 0 17.04 6ZM21.6 7.2a8.4 8.4 0 0 0-.528-2.784 5.904 5.904 0 0 0-3.376-3.376A8.4 8.4 0 0 0 14.88.48C13.92.432 13.608.42 12 .42s-1.92.012-2.88.06A8.4 8.4 0 0 0 6.336 1.04 5.904 5.904 0 0 0 2.96 4.416 8.4 8.4 0 0 0 2.4 7.2C2.352 8.16 2.34 8.472 2.34 12.084s.012 3.924.06 4.884a8.4 8.4 0 0 0 .52 2.784 5.904 5.904 0 0 0 3.376 3.376 8.4 8.4 0 0 0 2.784.528c.96.048 1.272.06 2.88.06s1.92-.012 2.88-.06a8.4 8.4 0 0 0 2.784-.528 5.904 5.904 0 0 0 3.376-3.376 8.4 8.4 0 0 0 .528-2.784c.048-.96.06-1.272.06-2.88s-.012-1.92-.06-2.88Zm-1.92 5.664a6.48 6.48 0 0 1-.408 2.208 3.984 3.984 0 0 1-2.28 2.28 6.48 6.48 0 0 1-2.208.408c-.936.044-1.248.056-2.784.056s-1.848-.012-2.784-.056a6.48 6.48 0 0 1-2.208-.408 3.984 3.984 0 0 1-2.28-2.28 6.48 6.48 0 0 1-.408-2.208C4.36 13.944 4.348 13.632 4.348 12s.012-1.944.056-2.88a6.48 6.48 0 0 1 .408-2.208 3.984 3.984 0 0 1 2.28-2.28 6.48 6.48 0 0 1 2.208-.408C10.236 4.18 10.548 4.168 12 4.168s1.764.012 2.784.056a6.48 6.48 0 0 1 2.208.408 3.984 3.984 0 0 1 2.28 2.28 6.48 6.48 0 0 1 .408 2.208c.044.936.056 1.248.056 2.88s-.012 1.944-.056 2.864Z"/>
+        </svg>`;
+
+        const ICON_TT = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="24" height="24" rx="6" fill="rgba(255,0,80,0.12)"/>
+            <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 0 0-.79-.05A6.34 6.34 0 0 0 3.15 15.3a6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.34-6.34V9.02a8.2 8.2 0 0 0 4.78 1.52V7.1a4.85 4.85 0 0 1-1.02-.41Z" fill="#ff0050"/>
+        </svg>`;
+
+        // ── Main Generate ──
+        document.getElementById('generateBtn').addEventListener('click', async () => {
+            const url = document.getElementById('videoUrlInput').value.trim();
+            if (!url) return showNotification('Paste a YouTube link first!', true);
+            if (getCredits() <= 0) return showNotification('No credits remaining. Upgrade your plan to keep generating!', true);
+
+            const btn = document.getElementById('generateBtn');
+            btn.disabled = true;
+
+            document.getElementById('loadingArea').style.display  = 'block';
+            document.getElementById('resultArea').style.display   = 'none';
+            document.getElementById('errorBox').style.display     = 'none';
+            document.getElementById('clipsGrid').innerHTML        = '';
+            setStep(0);
+
+            // Animate steps over time while the server works
+            const delays = [0, 9000, 35000, 60000, 115000];
+            const timers = delays.map((d, i) => setTimeout(() => setStep(i), d));
+
+            try {
+                // Derive everything from PLAN_CONFIG — single source of truth
+                const activePlan = isAdmin ? 'agency_elite' : userPlan;
+                const planCfg    = getPlanCfg(activePlan);
+
+                const payload = {
+                    url,
+                    resolution: planCfg.resolution,
+                    plan:       activePlan,
+                    priority:   planCfg.period === 'monthly',
+                    render:     (activePlan === 'pro_studio' || activePlan === 'agency_elite') ? 'advanced' : 'standard',
+                };
+                const res  = await fetch('/api/process-video', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                timers.forEach(clearTimeout);
+                const data = await res.json();
+
+                if (data.clips && data.clips.length > 0) {
+                    if (!isAdmin) { await spendCredit(); renderCredits(); }
+                    setStep(STEPS.length);
+
+                    // Save to Firestore history and reload the gallery
+                    if (currentUid) {
+                        saveClipsToHistory(currentUid, data.clips, url)
+                            .then(() => loadHistory(currentUid))
+                            .catch(e => console.warn('History save error:', e.message));
+                    }
+
+                    document.getElementById('loadingArea').style.display = 'none';
+                    document.getElementById('resultArea').style.display  = 'block';
+                    document.getElementById('clipCountBadge').textContent = `${data.clips.length} clips ready`;
+
+                    const grid = document.getElementById('clipsGrid');
+                    data.clips.forEach((clip, i) => {
+                        const card = document.createElement('div');
+                        card.className = 'clip-card';
+                        card.innerHTML = `
+                            <div class="clip-top">
+                                <div class="clip-num">${i + 1}</div>
+                                <div class="clip-meta">
+                                    <div class="clip-text">${clip.text || 'Highlight Clip ' + (i+1)}</div>
+                                    <div class="clip-time">${fmtTime(clip.start)} – ${fmtTime(clip.end)}</div>
+                                </div>
+                            </div>
+                            <div class="clip-badges">
+                                <span class="badge-pill badge-hd">▶ ${clip.resolution || getPlanCfg(userPlan).resolution.toUpperCase()}</span>
+                                <span class="badge-pill badge-size">💾 ${fmtSize(clip.fileSize)}</span>
+                                <span class="badge-pill badge-size">⏱ 30s</span>
+                            </div>
+                            <div class="video-wrapper" style="position:relative;display:inline-block;width:100%;max-width:350px;">
+                                <video src="${clip.clipUrl}" controls controlsList="nodownload" oncontextmenu="return false;" style="width:100%;display:block;" preload="metadata"></video>
+                            </div>
+                            <div class="clip-actions">
+                                <button class="btn-dl" onclick="forceBlobDownload('${clip.clipUrl}', '${clip.clipUrl.split('/').pop()}')">${ICON_DL} Save to Gallery</button>
+                                <a href="${clip.clipUrl}" target="_blank" class="share-btn" title="Share to Instagram">
+                                    ${ICON_IG}
+                                    <span class="tooltip">Save &amp; post to Instagram</span>
+                                </a>
+                                <a href="${clip.clipUrl}" target="_blank" class="share-btn" title="Share to TikTok">
+                                    ${ICON_TT}
+                                    <span class="tooltip">Save &amp; post to TikTok</span>
+                                </a>
+                            </div>
+                        `;
+                        grid.appendChild(card);
+                    });
+                } else {
+                    document.getElementById('loadingArea').style.display = 'none';
+                    const eb = document.getElementById('errorBox');
+                    eb.style.display = 'block';
+                    eb.textContent   = '❌ ' + (data.message || 'No clips were generated. Please try again.');
+                }
+            } catch (e) {
+                timers.forEach(clearTimeout);
+                document.getElementById('loadingArea').style.display = 'none';
+                const eb = document.getElementById('errorBox');
+                eb.style.display = 'block';
+                eb.textContent   = '❌ Server not responding. Make sure the app is running.';
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        // ── Mobile Bottom Nav ──
+        function mobScrollTo(sectionId) {
+            const el = document.getElementById(sectionId);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            document.querySelectorAll('.mob-nav-item').forEach(b => b.classList.remove('active'));
+            const map = { generateSection: 'mobGenerate', historySection: 'mobHistory' };
+            const btn = document.getElementById(map[sectionId]);
+            if (btn) btn.classList.add('active');
+        }
+
+        // ── Pricing Modal ──
+        const pricingOverlay = document.getElementById('pricingOverlay');
+        document.getElementById('upgradeBtn').addEventListener('click', () => pricingOverlay.classList.add('open'));
+        document.getElementById('modalCloseBtn').addEventListener('click', () => pricingOverlay.classList.remove('open'));
+        pricingOverlay.addEventListener('click', (e) => { if (e.target === pricingOverlay) pricingOverlay.classList.remove('open'); });
+
+        // ── UPI Payment Modal ──
+        let upiSelectedPlan  = "";
+        let upiSelectedPrice = 0;
+
+        function openUpiModal(planName, price) {
+            upiSelectedPlan  = planName;
+            upiSelectedPrice = price;
+
+            document.getElementById('upiTitle').innerText   = "Pay for " + planName;
+            document.getElementById('upiSub').innerText     = "Scan the QR or pay to viralclipaistudio@okhdfcbank";
+            document.getElementById('upiPrice').innerText   = "₹" + price;
+            document.getElementById('upiCaption').innerText = "Scan to pay ₹" + price + " (" + planName + ")";
+
+            const qrData = encodeURIComponent(
+                "upi://pay?pa=viralclipaistudio@okhdfcbank&pn=ViralClip%20AI&am=" + price + "&cu=INR"
+            );
+            document.getElementById('upiQR').src =
+                "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=" + qrData;
+
+            document.getElementById('upiUtrInput').value          = "";
+            document.getElementById('upiSuccess').style.display   = "none";
+            document.getElementById('upiSubmitBtn').style.display = "flex";
+            document.querySelector('.upi-lock').style.display      = "block";
+            document.getElementById('upiSubmitBtn').disabled       = false;
+            document.getElementById('upiSubmitText').innerText     = "Submit UTR for Verification";
+
+            document.getElementById('upiOverlay').classList.add('open');
+        }
+
+        function closeUpiModal() {
+            document.getElementById('upiOverlay').classList.remove('open');
+        }
+
+        document.getElementById('upiOverlay').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('upiOverlay')) closeUpiModal();
+        });
+
+        async function submitUpiUTR() {
+            const utr = document.getElementById('upiUtrInput').value.trim();
+            if (!utr) { alert("Please enter your UTR / Transaction ID."); return; }
+            if (utr.length < 6) { alert("That UTR looks too short. Please double-check."); return; }
+            if (!currentUser) { alert("You must be signed in. Please refresh and sign in."); return; }
+
+            const btn  = document.getElementById('upiSubmitBtn');
+            const text = document.getElementById('upiSubmitText');
+            btn.disabled = true;
+            text.innerText = "Submitting...";
+
+            try {
+                await db.collection("payment_requests").add({
+                    uid:       currentUser.uid,
+                    email:     currentUser.email,
+                    utr:       utr,
+                    plan:      upiSelectedPlan,
+                    amount:    upiSelectedPrice,
+                    status:    "pending",
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                fetch('/api/notify-payment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: currentUser.email, plan: upiSelectedPlan, amount: upiSelectedPrice, utr })
+                }).catch(()=>{});
+                btn.style.display = "none";
+                document.querySelector('.upi-lock').style.display = "none";
+                document.getElementById('upiSuccess').style.display = "block";
+            } catch (err) {
+                alert("❌ Submission failed. Please try again or email viralclipaistudio@gmail.com\n\nError: " + err.message);
+                btn.disabled  = false;
+                text.innerText = "Submit UTR for Verification";
+            }
+        }
+    </script>
+
+    <a href="mailto:viralclipaistudio@gmail.com?subject=ViralClip%20AI%20Support:%20Help%20Needed" class="email-float" title="Contact Support">
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+            <polyline points="22,6 12,13 2,6"></polyline>
+        </svg>
+    </a>
+
+    <footer class="vc-footer">
+      <div class="footer-content">
+        <p>&copy; 2026 ViralClip AI. All rights reserved.</p>
+        <div class="footer-links">
+          <a href="/terms.html" target="_blank" class="footer-link">Terms of Service</a>
+          <a href="/privacy.html" target="_blank" class="footer-link">Privacy Policy</a>
+          <a href="mailto:viralclipaistudio@gmail.com" class="footer-link">Support</a>
+        </div>
+      </div>
+    </footer>
+</body>
+</html>

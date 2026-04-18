@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication - ViralClip AI</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="./style.css">
+    
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+
+    <style>
+        body { display: flex; flex-direction: column; align-items: center; min-height: 100vh; background-color: #000; color: #fff; font-family: sans-serif; }
+        .card-wrapper { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; padding: 24px 16px; }
+        .login-card { background: #111; padding: 40px; border-radius: 20px; border: 1px solid #333; text-align: center; width: 90%; max-width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .logo span { color: #6366f1; }
+        
+        .tab-container { display: flex; margin-bottom: 25px; border-bottom: 1px solid #333; }
+        .tab-btn { flex: 1; padding: 10px; background: none; border: none; color: #777; font-size: 16px; cursor: pointer; transition: 0.3s; border-bottom: 2px solid transparent; }
+        .tab-btn.active { color: #fff; border-bottom: 2px solid #6366f1; font-weight: bold; }
+        
+        .auth-input { width: 100%; padding: 12px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #333; background: #0a0a0a; color: white; box-sizing: border-box; font-size: 15px; outline: none; }
+        .auth-input:focus { border-color: #6366f1; }
+        
+        .auth-btn { background: #6366f1; color: white; border: none; padding: 14px; border-radius: 8px; font-weight: bold; width: 100%; cursor: pointer; font-size: 16px; transition: 0.2s; }
+        .auth-btn:hover { background: #4f46e5; }
+        
+        .google-btn { background: #fff; color: #000; border: none; padding: 12px; border-radius: 8px; font-weight: bold; width: 100%; cursor: pointer; font-size: 15px; display: flex; justify-content: center; align-items: center; margin-bottom: 15px; transition: 0.2s; }
+        .google-btn:hover { background: #eee; }
+        .google-icon { width: 20px; margin-right: 10px; }
+        
+        .divider { display: flex; align-items: center; text-align: center; margin: 15px 0; color: #555; font-size: 12px; }
+        .divider::before, .divider::after { content: ''; flex: 1; border-bottom: 1px solid #333; }
+        .divider:not(:empty)::before { margin-right: .25em; }
+        .divider:not(:empty)::after { margin-left: .25em; }
+
+        .forgot-btn { background: none; border: none; color: #6366f1; cursor: pointer; font-size: 13px; margin-top: 12px; padding: 0; transition: color 0.2s; }
+        .forgot-btn:hover { color: #a5b4fc; }
+        .status-text { font-size: 13px; margin-top: 15px; min-height: 20px; }
+        #signupSection { display: none; }
+
+        /* ── Password Toggle ── */
+        .pw-wrap { position: relative; margin-bottom: 15px; }
+        .pw-wrap .auth-input { margin-bottom: 0; }
+        .pw-eye { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #777; cursor: pointer; padding: 4px; display: flex; align-items: center; }
+        .pw-eye:hover { color: #aaa; }
+
+        /* ── Forgot Password Panel ── */
+        #forgotSection { display: none; text-align: left; }
+        .back-btn { background: none; border: none; color: #6366f1; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 6px; padding: 0 0 18px 0; transition: color 0.2s; }
+        .back-btn:hover { color: #a5b4fc; }
+        .forgot-title { font-size: 18px; font-weight: 700; margin-bottom: 6px; color: #fff; }
+        .forgot-sub { font-size: 13px; color: #9ca3af; margin-bottom: 20px; line-height: 1.5; }
+        .reset-btn { background: linear-gradient(135deg, #6366f1, #a855f7); color: white; border: none; padding: 14px; border-radius: 8px; font-weight: bold; width: 100%; cursor: pointer; font-size: 16px; transition: opacity 0.2s; }
+        .reset-btn:hover { opacity: 0.9; }
+        .reset-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+        /* ── Reset Success State ── */
+        #resetSuccess { display: none; text-align: center; padding: 10px 0; }
+        .reset-icon { font-size: 52px; margin-bottom: 14px; }
+        .reset-success-title { font-size: 19px; font-weight: 700; color: #4ade80; margin-bottom: 10px; }
+        .reset-success-msg { font-size: 13px; color: #9ca3af; line-height: 1.6; margin-bottom: 22px; }
+        .back-login-btn { background: none; border: 1px solid #6366f1; color: #6366f1; padding: 11px; border-radius: 8px; font-size: 14px; font-weight: 600; width: 100%; cursor: pointer; transition: background 0.2s, color 0.2s; }
+        .back-login-btn:hover { background: #6366f1; color: #fff; }
+
+        /* ── Toast Notification ── */
+        #toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%) translateY(120px);
+            background: rgba(15, 15, 25, 0.92);
+            backdrop-filter: blur(12px);
+            color: #fff;
+            padding: 14px 24px;
+            border-radius: 14px;
+            font-size: 14px;
+            font-weight: 600;
+            max-width: 360px;
+            width: 90%;
+            text-align: center;
+            z-index: 9999;
+            border: 1px solid rgba(99,102,241,0.4);
+            box-shadow: 0 0 24px rgba(99,102,241,0.25);
+            transition: transform 0.4s cubic-bezier(0.34,1.56,0.64,1), opacity 0.3s;
+            opacity: 0;
+            pointer-events: none;
+        }
+        #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+        #toast.error { border-color: rgba(239,68,68,0.5); box-shadow: 0 0 24px rgba(239,68,68,0.3); }
+        #toast.success { border-color: rgba(16,185,129,0.5); box-shadow: 0 0 24px rgba(16,185,129,0.25); }
+
+        /* ── Floating Support Button ── */
+        .email-float {
+            position: fixed;
+            width: 60px;
+            height: 60px;
+            bottom: 40px;
+            right: 40px;
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            color: #FFF;
+            border-radius: 50px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4);
+            z-index: 10000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: all 0.3s ease;
+            text-decoration: none;
+        }
+        .email-float:hover {
+            transform: translateY(-5px) scale(1.05);
+            box-shadow: 0 8px 25px rgba(168, 85, 247, 0.6);
+        }
+        .vc-footer {
+            background-color: #0f0f13;
+            border-top: 1px solid rgba(168, 85, 247, 0.2);
+            padding: 1.5rem 1rem;
+            text-align: center;
+            font-family: inherit;
+            width: 100%;
+            margin-top: auto;
+        }
+        .footer-content {
+            max-width: 800px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            align-items: center;
+        }
+        .footer-content p {
+            color: #888;
+            font-size: 0.85rem;
+            margin: 0;
+        }
+        .footer-links {
+            display: flex;
+            gap: 1.5rem;
+            justify-content: center;
+        }
+        .footer-link {
+            color: #ccc;
+            text-decoration: none;
+            font-size: 0.85rem;
+            transition: all 0.3s ease;
+        }
+        .footer-link:hover {
+            color: #a855f7;
+            text-shadow: 0 0 10px rgba(168, 85, 247, 0.4);
+        }
+    </style>
+</head>
+<body>
+    <div id="toast"></div>
+
+    <div class="card-wrapper">
+    <div class="login-card">
+        <a href="./index.html" class="logo" style="font-size: 2rem; margin-bottom: 20px; display: block; text-decoration: none; color: white; font-weight: bold;">ViralClip <span>AI</span></a>
+        
+        <div class="tab-container">
+            <button id="tabLogin" class="tab-btn active">Log In</button>
+            <button id="tabSignup" class="tab-btn">Sign Up</button>
+        </div>
+        
+        <div id="loginSection">
+            <input type="email" id="loginEmail" class="auth-input" placeholder="Registered Email">
+            <div class="pw-wrap">
+                <input type="password" id="loginPassword" class="auth-input" placeholder="Password">
+                <button type="button" class="pw-eye" onclick="togglePw('loginPassword', this)" title="Show/hide password">
+                    <svg id="eyeIconLogin" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+            </div>
+            <button type="button" id="loginBtn" class="auth-btn">Log In</button>
+            <button type="button" id="forgotBtn" class="forgot-btn">Forgot Password?</button>
+        </div>
+
+        <div id="signupSection">
+            <input type="email" id="signupEmail" class="auth-input" placeholder="Real Email Address (Required)">
+            <div class="pw-wrap">
+                <input type="password" id="signupPassword" class="auth-input" placeholder="Create Password (min 6 chars)">
+                <button type="button" class="pw-eye" onclick="togglePw('signupPassword', this)" title="Show/hide password">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+            </div>
+            <button type="button" id="signupBtn" class="auth-btn">Create Account</button>
+        </div>
+        
+        <p id="statusText" class="status-text"></p>
+    </div>
+    </div>
+
+    <script>
+        // ── Password Show/Hide Toggle ──
+        function togglePw(inputId, btn) {
+            const input = document.getElementById(inputId);
+            const isHidden = input.type === 'password';
+            input.type = isHidden ? 'text' : 'password';
+            const svg = btn.querySelector('svg');
+            if (isHidden) {
+                svg.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>';
+            } else {
+                svg.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+            }
+        }
+
+        // ── Toast Notification System ──
+        let toastTimer = null;
+        function showNotification(message, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'show ' + (isError ? 'error' : 'success');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => { toast.className = ''; }, 3800);
+        }
+
+        // 1. Firebase Initialization
+        const firebaseConfig = {
+          apiKey: "AIzaSyBpNdos_eIDIhgvpTsgEEFEVX8nS6d2y-E",
+          authDomain: "viralclipai-418f6.firebaseapp.com",
+          projectId: "viralclipai-418f6",
+          storageBucket: "viralclipai-418f6.firebasestorage.app",
+          messagingSenderId: "389107980652",
+          appId: "1:389107980652:web:f1add75fff14026364fb49"
+        };
+        if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+        const auth = firebase.auth();
+        const googleProvider = new firebase.auth.GoogleAuthProvider();
+
+        // 2. UI Elements
+        const tabLogin = document.getElementById('tabLogin');
+        const tabSignup = document.getElementById('tabSignup');
+        const loginSection = document.getElementById('loginSection');
+        const signupSection = document.getElementById('signupSection');
+        const statusText = document.getElementById('statusText');
+        const blockedDomains = ['tempmail.com', '10minutemail.com', 'yopmail.com', 'mailinator.com', 'guerrillamail.com'];
+
+        // 3. Tab Switching Logic
+        tabLogin.addEventListener('click', () => {
+            tabLogin.classList.add('active'); tabSignup.classList.remove('active');
+            loginSection.style.display = 'block'; signupSection.style.display = 'none'; statusText.innerText = "";
+        });
+        tabSignup.addEventListener('click', () => {
+            tabSignup.classList.add('active'); tabLogin.classList.remove('active');
+            signupSection.style.display = 'block'; loginSection.style.display = 'none'; statusText.innerText = "";
+        });
+
+        // 4. GOOGLE SIGN-IN LOGIC (Mobile Redirect Fix)
+        auth.getRedirectResult().then((result) => {
+            if (result.credential) {
+                window.location.replace("./dashboard.html");
+            }
+        }).catch((error) => {
+            if (error.message) {
+                statusText.innerText = "";
+                showNotification("Google Sign-In Error: " + error.message, true);
+            }
+        });
+
+        const googleBtns = document.querySelectorAll('.login-google');
+        googleBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                statusText.innerText = "Redirecting to Google...";
+                statusText.style.color = "#aaa";
+                auth.signInWithRedirect(googleProvider);
+            });
+        });
+
+        // 5. SIGN UP LOGIC
+        document.getElementById('signupBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            const email = document.getElementById('signupEmail').value.trim();
+            const password = document.getElementById('signupPassword').value;
+            
+            if (!email || !password) return showNotification("Please fill in all fields.", true);
+            if (password.length < 6) return showNotification("Password must be at least 6 characters.", true);
+
+            const domain = email.split('@')[1];
+            if (blockedDomains.includes(domain)) return showNotification("Temporary emails are not allowed. Use a real email.", true);
+
+            statusText.innerText = "Creating secure account..."; statusText.style.color = "#aaa";
+
+            auth.createUserWithEmailAndPassword(email, password)
+                .then((userCredential) => {
+                    userCredential.user.sendEmailVerification().then(() => {
+                        auth.signOut();
+                        statusText.innerText = "";
+                        showNotification("✅ Account created! Check your inbox (and Spam folder) for the verification link.");
+                        setTimeout(() => {
+                            tabLogin.click();
+                            document.getElementById('loginEmail').value = email;
+                        }, 1000);
+                    });
+                })
+                .catch((error) => { statusText.innerText = ""; showNotification("Signup Error: " + error.message, true); });
+        });
+
+        // 6. LOG IN LOGIC
+        document.getElementById('loginBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value.trim();
+            const password = document.getElementById('loginPassword').value;
+            if (!email || !password) return showNotification("Please enter your email and password.", true);
+
+            statusText.innerText = "Authenticating..."; statusText.style.color = "#aaa";
+
+            auth.signInWithEmailAndPassword(email, password)
+                .then((userCredential) => {
+                    if (userCredential.user.emailVerified) {
+                        window.location.replace("./dashboard.html");
+                    } else {
+                        auth.signOut(); statusText.innerText = "";
+                        showNotification("🛑 Access Denied: Please verify your email first. Check your inbox and Spam folder.", true);
+                    }
+                })
+                .catch((error) => { statusText.innerText = ""; showNotification("Login Error: " + error.message, true); });
+        });
+
+        // 7. Forgot Password Logic
+        document.getElementById('forgotBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value.trim();
+            if (!email) return showNotification("Type your email in the box above first, then click Forgot Password.", true);
+
+            statusText.innerText = "Sending reset link...";
+            auth.sendPasswordResetEmail(email)
+                .then(() => { statusText.innerText = ""; showNotification("✅ Password reset link sent! Check your email."); })
+                .catch((error) => { statusText.innerText = ""; showNotification("Error: " + error.message, true); });
+        });
+    </script>
+
+    <a href="mailto:viralclipaistudio@gmail.com?subject=ViralClip%20AI%20Support:%20Help%20Needed" class="email-float" title="Contact Support">
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+            <polyline points="22,6 12,13 2,6"></polyline>
+        </svg>
+    </a>
+
+    <footer class="vc-footer">
+      <div class="footer-content">
+        <p>&copy; 2026 ViralClip AI. All rights reserved.</p>
+        <div class="footer-links">
+          <a href="/terms.html" target="_blank" class="footer-link">Terms of Service</a>
+          <a href="/privacy.html" target="_blank" class="footer-link">Privacy Policy</a>
+          <a href="mailto:viralclipaistudio@gmail.com" class="footer-link">Support</a>
+        </div>
+      </div>
+    </footer>
+</body>
+</html>

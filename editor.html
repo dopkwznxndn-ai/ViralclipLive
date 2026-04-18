@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Editor - ViralClip AI</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    
+    <style>
+        :root {
+            --bg: #0f1015;
+            --card-bg: #1a1b23;
+            --border: #2a2b36;
+            --primary: #6366f1;
+            --text: #ffffff;
+            --text-muted: #9ca3af;
+        }
+        
+        body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
+        
+        nav { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid var(--border); background: var(--card-bg); }
+        .logo { font-size: 20px; font-weight: bold; color: white; text-decoration: none; }
+        .logo span { color: var(--primary); }
+        .btn { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; text-decoration: none; font-size: 14px; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-outline { background: transparent; border: 1px solid var(--border); color: white; }
+        
+        .editor-container { display: flex; flex-direction: column; height: calc(100vh - 65px); }
+        @media (min-width: 768px) { .editor-container { flex-direction: row; } }
+        
+        .preview-section { flex: 1; display: flex; align-items: center; justify-content: center; background: #000; padding: 20px; position: relative; }
+        
+        .video-placeholder { width: 100%; max-width: 320px; aspect-ratio: 9/16; border: 2px dashed #333; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; overflow: hidden; background: #0a0a0a; }
+        
+        #actualVideo { display: none; width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        .ui-elements { z-index: 5; display: flex; flex-direction: column; align-items: center; width: 100%; }
+        .ui-elements h2 { color: #4ade80; text-transform: uppercase; margin:0; font-size: 32px; text-align: center; letter-spacing: 2px;}
+        .ui-elements p { color: white; margin: 5px 0 0 0; font-weight: bold; text-align: center; font-size: 24px; letter-spacing: 2px;}
+        
+        .loading-overlay { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
+        .spinner { width: 40px; height: 40px; border: 4px solid #333; border-top: 4px solid var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .settings-sidebar { width: 100%; max-width: 400px; background: var(--card-bg); border-left: 1px solid var(--border); padding: 25px; box-sizing: border-box; overflow-y: auto; }
+        .section-title { font-size: 12px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 1px; margin-bottom: 15px; font-weight: bold;}
+        
+        .style-card { border: 1px solid var(--primary); background: rgba(99, 102, 241, 0.1); padding: 15px; border-radius: 8px; margin-bottom: 12px; cursor: pointer; transition: all 0.2s; }
+        .style-card.inactive { border: 1px solid var(--border); background: transparent; }
+        .style-card h4 { margin: 0 0 5px 0; font-size: 15px;}
+        .style-card p { margin: 0; font-size: 13px; color: var(--text-muted); line-height: 1.4;}
+        
+        .toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 15px 0; border-bottom: 1px solid var(--border); }
+        .toggle-label { font-weight: bold; font-size: 14px; display: flex; align-items: center; gap: 8px;}
+        .toggle-switch { width: 44px; height: 24px; background: var(--primary); border-radius: 12px; position: relative; cursor: pointer; transition: 0.3s;}
+        .toggle-switch::after { content: ''; position: absolute; right: 2px; top: 2px; width: 20px; height: 20px; background: white; border-radius: 50%; transition: 0.3s;}
+        .toggle-switch.off { background: #333; }
+        .toggle-switch.off::after { right: 22px; }
+        
+        .export-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 15px; }
+        .export-btn { background: #222; border: 1px solid var(--border); padding: 15px; border-radius: 8px; text-align: center; color: white; font-weight: bold; cursor: pointer; font-size: 14px;}
+        .export-btn:hover { background: #2a2a2a; }
+        .vc-footer { background-color: #0f0f13; border-top: 1px solid rgba(168,85,247,0.2); padding: 1.5rem 1rem; text-align: center; font-family: inherit; width: 100%; margin-top: 40px; }
+        .footer-content { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; align-items: center; }
+        .footer-content p { color: #888; font-size: 0.85rem; margin: 0; }
+        .footer-links { display: flex; gap: 1.5rem; justify-content: center; }
+        .footer-link { color: #ccc; text-decoration: none; font-size: 0.85rem; transition: all 0.3s ease; }
+        .footer-link:hover { color: #a855f7; text-shadow: 0 0 10px rgba(168,85,247,0.4); }
+    </style>
+</head>
+<body>
+
+    <nav>
+        <a href="./dashboard.html" class="btn btn-outline">← Back</a>
+        <div class="logo">ViralClip <span>AI</span></div>
+        <button class="btn btn-primary" id="generateBtn">Generate ✨</button>
+    </nav>
+    
+    <div class="editor-container">
+        <div class="preview-section">
+            <div class="video-placeholder" id="videoPlayer">
+                
+                <video id="actualVideo" autoplay loop muted playsinline></video>
+                
+                <div class="ui-elements" id="uiElements">
+                    <h2 id="previewTextMain">CLEAN</h2>
+                    <p id="previewTextSub">TEXT</p>
+                    
+                    <input type="file" id="videoUpload" accept="video/mp4,video/x-m4v,video/*" style="display: none;">
+                    <button id="uploadBtn" class="btn btn-outline" style="margin-top: 20px; border-color: #4ade80; color: #4ade80;">📤 Select Video</button>
+                    <p id="uploadStatus" style="color: #4ade80; font-size: 14px; font-weight: bold; margin-top: 10px; display: none;">Uploading: 0%</p>
+                </div>
+
+                <div class="loading-overlay" id="loadingOverlay">
+                    <div class="spinner"></div>
+                    <p style="margin-top: 20px; color: white; font-weight: bold; font-size: 14px;">AI is analyzing video...</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-sidebar">
+            <div class="section-title">Caption Styles</div>
+            <div class="style-card inactive" onclick="selectStyle(this, 'KINETIC', 'ENERGY')">
+                <h4>KINETIC</h4>
+                <p>Fast paced animated words with high-contrast color shifts.</p>
+            </div>
+            <div class="style-card" onclick="selectStyle(this, 'BOLD', 'STATIC')">
+                <h4>BOLD STATIC</h4>
+                <p>Clean, non-distracting typography optimized for clinical clarity.</p>
+            </div>
+            
+            <div class="section-title" style="margin-top: 35px;">AI Enhancement</div>
+            <div class="toggle-row">
+                <div class="toggle-label">🎯 Face Tracking</div>
+                <div class="toggle-switch" onclick="this.classList.toggle('off')"></div>
+            </div>
+            <div class="toggle-row">
+                <div class="toggle-label">📱 Auto Reframe (9:16)</div>
+                <div class="toggle-switch off" onclick="this.classList.toggle('off')"></div>
+            </div>
+            
+            <div class="section-title" style="margin-top: 35px;">Export & Share</div>
+            <div class="export-grid">
+                <div class="export-btn" id="mp4Btn">💾 MP4</div>
+                <div class="export-btn" id="shareBtn">🔗 SHARE</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const firebaseConfig = {
+          apiKey: "AIzaSyBpNdos_eIDIhgvpTsgEEFEVX8nS6d2y-E",
+          authDomain: "viralclipai-418f6.firebaseapp.com",
+          projectId: "viralclipai-418f6",
+          storageBucket: "viralclipai-418f6.firebasestorage.app",
+          messagingSenderId: "389107980652",
+          appId: "1:389107980652:web:f1add75fff14026364fb49"
+        };
+        if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+        const auth = firebase.auth();
+
+        auth.onAuthStateChanged((user) => {
+            if (!user) { window.location.href = "./signin.html"; }
+        });
+
+        function selectStyle(element, mainText, subText) {
+            document.querySelectorAll('.style-card').forEach(card => card.classList.add('inactive'));
+            element.classList.remove('inactive');
+            document.getElementById('previewTextMain').innerText = mainText;
+            document.getElementById('previewTextSub').innerText = subText;
+        }
+
+        const uploadBtn = document.getElementById('uploadBtn');
+        const videoUploadInput = document.getElementById('videoUpload');
+        const uploadStatus = document.getElementById('uploadStatus');
+        const actualVideo = document.getElementById('actualVideo');
+        const uiElements = document.getElementById('uiElements');
+
+        uploadBtn.addEventListener('click', () => { videoUploadInput.click(); });
+
+        videoUploadInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            uploadStatus.style.display = 'block';
+            uploadBtn.style.display = 'none'; 
+            
+            let progress = 0;
+            const fakeUpload = setInterval(() => {
+                progress += 15;
+                if (progress > 99) progress = 99;
+                uploadStatus.innerText = `Uploading: ${progress}%`;
+                
+                if (progress === 99) {
+                    clearInterval(fakeUpload);
+                    setTimeout(() => {
+                        const videoURL = URL.createObjectURL(file);
+                        actualVideo.src = videoURL;
+                        actualVideo.style.display = 'block'; 
+                        uiElements.style.display = 'none'; 
+                    }, 500);
+                }
+            }, 300); 
+        });
+
+        document.getElementById('generateBtn').addEventListener('click', () => {
+            if(actualVideo.style.display === 'none' || actualVideo.src === '') {
+                alert("Please upload a video first!");
+                return;
+            }
+            const overlay = document.getElementById('loadingOverlay');
+            overlay.style.display = 'flex';
+            setTimeout(() => {
+                overlay.style.display = 'none';
+                alert('Analysis complete! (This is where the API cuts the video and generates Zack D. captions).');
+            }, 3000);
+        });
+
+        // --- NEW EXPORT & SHARE BUTTON LOGIC ---
+        const mp4Btn = document.getElementById('mp4Btn');
+        const shareBtn = document.getElementById('shareBtn');
+
+        mp4Btn.addEventListener('click', () => {
+            if(actualVideo.style.display === 'none' || actualVideo.src === '') {
+                alert("Upload a video first!");
+                return;
+            }
+            const a = document.createElement('a');
+            a.href = actualVideo.src;
+            a.download = 'ViralClip_Draft.mp4';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        });
+
+        shareBtn.addEventListener('click', async () => {
+            if(actualVideo.style.display === 'none' || actualVideo.src === '') {
+                alert("Upload a video first!");
+                return;
+            }
+            if (navigator.share) {
+                try {
+                    await navigator.share({
+                        title: 'My ViralClip AI Video',
+                        text: 'Check out the video I am editing!',
+                        url: window.location.href
+                    });
+                } catch (err) {
+                    console.log("User cancelled share or error:", err);
+                }
+            } else {
+                alert("Sharing is not supported on this specific browser.");
+            }
+        });
+    </script>
+
+    <footer class="vc-footer">
+      <div class="footer-content">
+        <p>&copy; 2026 ViralClip AI. All rights reserved.</p>
+        <div class="footer-links">
+          <a href="/terms.html" target="_blank" class="footer-link">Terms of Service</a>
+          <a href="/privacy.html" target="_blank" class="footer-link">Privacy Policy</a>
+          <a href="mailto:viralclipaistudio@gmail.com" class="footer-link">Support</a>
+        </div>
+      </div>
+    </footer>
+</body>
+</html>
