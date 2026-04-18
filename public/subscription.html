@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upgrade - ViralClip AI</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+    
+    <style>
+        :root {
+            --bg: #0f1015;
+            --card-bg: #1a1b23;
+            --border: #2a2b36;
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --text: #ffffff;
+            --text-muted: #9ca3af;
+            --success: #4ade80;
+        }
+        
+        * { box-sizing: border-box; }
+        html, body { overflow-x: hidden; }
+        body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
+        
+        nav { display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--card-bg); }
+        .logo { font-size: 20px; font-weight: bold; color: white; text-decoration: none; flex-shrink: 0; }
+        .logo span { color: var(--primary); }
+        .btn-outline { padding: 7px 14px; border-radius: 6px; background: transparent; border: 1px solid var(--border); color: white; cursor: pointer; font-weight: bold; text-decoration: none; font-size: 13px; white-space: nowrap; }
+        
+        .pricing-container { max-width: 1160px; margin: 30px auto; padding: 16px; text-align: center; }
+        h1 { font-size: clamp(22px, 4vw, 32px); margin-bottom: 8px; }
+        p.subtitle { color: var(--text-muted); margin-bottom: 32px; font-size: 14px; }
+        
+        .pricing-grid { display: grid; grid-template-columns: 1fr; gap: 16px; max-width: 1100px; margin: 0 auto; }
+        @media (min-width: 600px) { .pricing-grid { grid-template-columns: 1fr 1fr; } }
+        @media (min-width: 1024px) { .pricing-grid { grid-template-columns: repeat(4, 1fr); } }
+        
+        .plan-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; padding: 24px 20px; text-align: left; position: relative; }
+        .plan-card.pro { border: 2px solid var(--primary); box-shadow: 0 0 20px rgba(99, 102, 241, 0.2); }
+        .pro-badge { position: absolute; top: -12px; right: 20px; background: var(--primary); color: white; font-size: 12px; font-weight: bold; padding: 4px 12px; border-radius: 20px; text-transform: uppercase; letter-spacing: 1px; }
+        
+        .plan-name { font-size: 20px; font-weight: bold; margin-bottom: 10px; }
+        .plan-price { font-size: 40px; font-weight: bold; margin-bottom: 20px; display: flex; align-items: baseline; gap: 5px; }
+        .plan-price span { font-size: 16px; color: var(--text-muted); font-weight: normal; }
+        
+        .feature-list { list-style: none; padding: 0; margin: 0 0 30px 0; }
+        .feature-list li { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; color: var(--text-muted); font-size: 15px; }
+        .feature-list li.active { color: white; }
+        .check { color: var(--success); font-weight: bold; }
+        
+        .btn-plan { width: 100%; padding: 14px; border-radius: 8px; border: none; font-weight: bold; font-size: 16px; cursor: pointer; transition: 0.2s; }
+        .btn-free { background: #2a2b36; color: white; }
+        .btn-pro { background: var(--primary); color: white; }
+        .btn-pro:hover { background: var(--primary-hover); }
+
+        /* PAYMENT MODAL (NEW) */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; backdrop-filter: blur(5px); }
+        .payment-box { background: white; color: #333; width: 94%; max-width: 420px; border-radius: 12px; overflow: hidden; transform: translateY(50px); animation: slideUp 0.3s forwards; max-height: 92vh; overflow-y: auto; }
+        @keyframes slideUp { to { transform: translateY(0); } }
+        
+        .payment-header { background: #f8f9fa; padding: 20px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; }
+        .payment-header h3 { margin: 0; font-size: 18px; color: #111; }
+        .close-btn { background: none; border: none; font-size: 24px; cursor: pointer; color: #666; }
+        
+        .payment-body { padding: 20px; }
+        .pay-label { display: block; font-size: 13px; font-weight: bold; color: #555; margin-bottom: 8px; text-transform: uppercase;}
+        .pay-input { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 6px; margin-bottom: 20px; box-sizing: border-box; font-size: 16px; }
+        
+        .btn-pay { width: 100%; background: #000; color: white; padding: 15px; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 10px; }
+        .btn-pay:hover { background: #222; }
+        
+        .spinner { display: none; width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-top: 3px solid white; border-radius: 50%; animation: spin 1s linear infinite; }
+
+        /* QR CODE */
+        .qr-code-wrapper { display: flex; flex-direction: column; align-items: center; margin: 16px 0; }
+        .qr-code-img { display: block; width: 200px; height: 200px; border: 6px solid #ffffff; border-radius: 10px; box-shadow: 0 0 18px rgba(168,85,247,0.25); background: #fff; }
+        .qr-caption { margin-top: 10px; font-size: 13px; font-weight: 600; color: #a855f7; letter-spacing: 0.3px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .vc-footer { background-color: #0f0f13; border-top: 1px solid rgba(168,85,247,0.2); padding: 1.5rem 1rem; text-align: center; font-family: inherit; width: 100%; margin-top: 40px; }
+        .footer-content { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; align-items: center; }
+        .footer-content p { color: #888; font-size: 0.85rem; margin: 0; }
+        .footer-links { display: flex; gap: 1.5rem; justify-content: center; }
+        .footer-link { color: #ccc; text-decoration: none; font-size: 0.85rem; transition: all 0.3s ease; }
+        .footer-link:hover { color: #a855f7; text-shadow: 0 0 10px rgba(168,85,247,0.4); }
+    </style>
+</head>
+<body>
+
+    <nav>
+        <a href="./dashboard.html" class="btn-outline">← Back to Dashboard</a>
+        <div class="logo">ViralClip <span>AI</span></div>
+        <div style="width: 70px;"></div>
+    </nav>
+    
+    <div class="pricing-container">
+        <h1>Unlock the Full Power of AI</h1>
+        <p class="subtitle">Turn long videos into viral shorts automatically. Cancel anytime.</p>
+        
+        <div class="pricing-grid">
+            <div class="plan-card">
+                <div class="plan-name">Free</div>
+                <div class="plan-price">₹0<span>/ forever</span></div>
+                <ul class="feature-list">
+                    <li class="active"><span class="check">✓</span> 1 Video / Credit per day</li>
+                    <li class="active"><span class="check">✓</span> 720p Standard Resolution</li>
+                    <li class="active"><span class="check">✓</span> AI-Powered Captions</li>
+                    <li class="active"><span class="check">✓</span> Auto Face Tracking</li>
+                    <li><span style="color: #555;">✗</span> ViralClip AI Watermark</li>
+                </ul>
+                <button class="btn-plan btn-free" id="currentPlanBtn">Current Plan</button>
+            </div>
+            
+            <div class="plan-card pro">
+                <div class="pro-badge">Most Popular</div>
+                <div class="plan-name">Creator</div>
+                <div class="plan-price">₹99<span>/ month</span></div>
+                <p style="color:#888; font-size:13px; margin: -14px 0 16px;">~$1.19 USD / month</p>
+                <ul class="feature-list">
+                    <li class="active"><span class="check">✓</span> 2 Videos / Credits per day</li>
+                    <li class="active"><span class="check">✓</span> 1080p High Quality</li>
+                    <li class="active"><span class="check">✓</span> No Watermarks</li>
+                    <li class="active"><span class="check">✓</span> AI-Powered Captions</li>
+                    <li class="active"><span class="check">✓</span> Auto Face Tracking</li>
+                </ul>
+                <button class="btn-plan btn-pro" onclick="openPaymentModal('Creator', 99)">Upgrade — ₹99/mo</button>
+            </div>
+
+            <div class="plan-card" style="border: 2px solid #a855f7; box-shadow: 0 0 20px rgba(168,85,247,0.2);">
+                <div class="pro-badge" style="background: #a855f7;">Studio</div>
+                <div class="plan-name">Pro Studio</div>
+                <div class="plan-price">₹199<span>/ month</span></div>
+                <p style="color:#888; font-size:13px; margin: -14px 0 16px;">~$2.39 USD / month</p>
+                <ul class="feature-list">
+                    <li class="active"><span class="check">✓</span> 3 Videos / Credits per day</li>
+                    <li class="active"><span class="check">✓</span> 1440p (2K) Resolution</li>
+                    <li class="active"><span class="check">✓</span> No Watermarks</li>
+                    <li class="active"><span class="check">✓</span> Priority Processing Queue</li>
+                    <li class="active"><span class="check">✓</span> Auto Face Tracking</li>
+                </ul>
+                <button class="btn-plan btn-pro" style="background: #a855f7;" onclick="openPaymentModal('Pro Studio', 199)">Upgrade — ₹199/mo</button>
+            </div>
+
+            <div class="plan-card" style="border: 2px solid #ef4444; box-shadow: 0 0 20px rgba(239,68,68,0.2);">
+                <div class="pro-badge" style="background: #ef4444;">Agency</div>
+                <div class="plan-name">Agency Elite</div>
+                <div class="plan-price">₹399<span>/ month</span></div>
+                <p style="color:#888; font-size:13px; margin: -14px 0 16px;">~$4.79 USD / month</p>
+                <ul class="feature-list">
+                    <li class="active"><span class="check">✓</span> 5 Videos / Credits per day</li>
+                    <li class="active"><span class="check">✓</span> 4K Ultra HD Resolution</li>
+                    <li class="active"><span class="check">✓</span> No Watermarks</li>
+                    <li class="active"><span class="check">✓</span> Full Commercial Rights</li>
+                    <li class="active"><span class="check">✓</span> Dedicated Support</li>
+                </ul>
+                <button class="btn-plan btn-pro" style="background: #ef4444;" onclick="openPaymentModal('Agency Elite', 399)">Upgrade — ₹399/mo</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="paymentModal" onclick="if(event.target===this)closePaymentModal()">
+        <div class="payment-box">
+            <div class="payment-header">
+                <h3 id="modalTitle">Complete UPI Payment</h3>
+                <button class="close-btn" id="closeModal" onclick="closePaymentModal()">×</button>
+            </div>
+            <div class="payment-body" id="paymentForm">
+                <div style="background: #f0fdf4; color: #166534; padding: 10px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; border: 1px solid #bbf7d0;">
+                    <strong>Step 1:</strong> Pay <strong id="modalPrice">₹499</strong> to UPI ID: <strong>viralclipaistudio@okhdfcbank</strong>
+                </div>
+
+                <div class="qr-code-wrapper">
+                    <img id="modalQR" src="" alt="Pay via UPI" class="qr-code-img">
+                    <span class="qr-caption" id="modalCaption">Scan to pay ₹499 (Creator Pro)</span>
+                </div>
+
+                <div style="background: #eff6ff; color: #1e40af; padding: 10px; border-radius: 6px; margin-bottom: 20px; font-size: 14px; border: 1px solid #bfdbfe;">
+                    <strong>Step 2:</strong> Paste your UTR / Transaction ID below so we can verify your payment.
+                </div>
+
+                <label class="pay-label">UTR / Transaction ID</label>
+                <input type="text" class="pay-input" id="utrInput" placeholder="e.g., 123456789012" maxlength="64">
+
+                <button class="btn-pay" id="processPayBtn" onclick="submitUTR()">
+                    <span id="payText">Submit UTR for Verification</span>
+                    <div class="spinner" id="paySpinner"></div>
+                </button>
+                <p style="text-align: center; color: #888; font-size: 12px; margin-top: 15px;">🔒 Your transaction ID is stored securely</p>
+                <p style="text-align: center; color: #888; font-size: 12px; margin-top: 8px; line-height: 1.5;">Currently accepting UPI payments only (India).<br>International cards coming soon!</p>
+            </div>
+
+            <div class="payment-body" id="successMessage" style="display:none;">
+                <div style="text-align:center; padding: 10px 0;">
+                    <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
+                    <h3 style="color: #166534; margin-bottom: 12px;">UTR Submitted Successfully!</h3>
+                    <p style="color: #555; font-size: 14px; line-height: 1.6;">
+                        Please allow a few hours for our admin team to manually verify your payment and unlock your Creator Elite features.
+                    </p>
+                    <p style="color: #888; font-size: 13px; margin-top: 12px;">
+                        Questions? Email us at <a href="mailto:viralclipaistudio@gmail.com" style="color: #6366f1;">viralclipaistudio@gmail.com</a>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ── Firebase init ──
+        const firebaseConfig = {
+            apiKey: "AIzaSyBpNdos_eIDIhgvpTsgEEFEVX8nS6d2y-E",
+            authDomain: "viralclipai-418f6.firebaseapp.com",
+            projectId: "viralclipai-418f6",
+            storageBucket: "viralclipai-418f6.firebasestorage.app",
+            messagingSenderId: "389107980652",
+            appId: "1:389107980652:web:f1add75fff14026364fb49"
+        };
+        if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+        const auth = firebase.auth();
+        const db   = firebase.firestore();
+
+        let currentUser = null;
+        let selectedPlan = "";
+        let selectedPrice = 0;
+
+        auth.onAuthStateChanged((user) => {
+            if (!user) {
+                window.location.href = "./signin.html";
+            } else {
+                currentUser = user;
+            }
+        });
+
+        function openPaymentModal(planName, price) {
+            selectedPlan  = planName;
+            selectedPrice = price;
+
+            document.getElementById('modalTitle').innerText   = "Pay for " + planName;
+            document.getElementById('modalPrice').innerText   = "₹" + price.toLocaleString('en-IN');
+            document.getElementById('modalCaption').innerText = "Scan to pay ₹" + price.toLocaleString('en-IN') + " (" + planName + ")";
+
+            const qrData = encodeURIComponent(
+                "upi://pay?pa=viralclipaistudio@okhdfcbank&pn=ViralClip%20AI&am=" + price + "&cu=INR"
+            );
+            document.getElementById('modalQR').src =
+                "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=" + qrData;
+
+            document.getElementById('utrInput').value = "";
+            document.getElementById('paymentForm').style.display  = "block";
+            document.getElementById('successMessage').style.display = "none";
+
+            const btn = document.getElementById('processPayBtn');
+            btn.disabled = false;
+            btn.style.background = "#000";
+            document.getElementById('payText').innerText = "Submit UTR for Verification";
+            document.getElementById('paySpinner').style.display = "none";
+
+            document.getElementById('paymentModal').style.display = 'flex';
+        }
+
+        function closePaymentModal() {
+            document.getElementById('paymentModal').style.display = 'none';
+        }
+
+        // ── UTR submit — called directly by onclick on the button ──
+        async function submitUTR() {
+            const utrInput       = document.getElementById('utrInput');
+            const processPayBtn  = document.getElementById('processPayBtn');
+            const payText        = document.getElementById('payText');
+            const paySpinner     = document.getElementById('paySpinner');
+            const paymentForm    = document.getElementById('paymentForm');
+            const successMessage = document.getElementById('successMessage');
+
+            const utr = utrInput.value.trim();
+
+            if (!utr) {
+                alert("Please enter your UTR / Transaction ID before submitting.");
+                utrInput.focus();
+                return;
+            }
+            if (utr.length < 6) {
+                alert("That UTR looks too short. Please double-check your Transaction ID and try again.");
+                utrInput.focus();
+                return;
+            }
+            if (!currentUser) {
+                alert("You must be signed in to submit a payment. Please refresh the page and sign in.");
+                return;
+            }
+
+            // Loading state — prevent double-click
+            processPayBtn.disabled = true;
+            payText.innerText = "Submitting...";
+            paySpinner.style.display = "block";
+            processPayBtn.style.background = "#555";
+
+            try {
+                await db.collection("payment_requests").add({
+                    uid:       currentUser.uid,
+                    email:     currentUser.email,
+                    utr:       utr,
+                    plan:      selectedPlan,
+                    amount:    selectedPrice,
+                    status:    "pending",
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                fetch('/api/notify-payment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: currentUser.email, plan: selectedPlan, amount: selectedPrice, utr })
+                }).catch(()=>{});
+
+                paymentForm.style.display = "none";
+                successMessage.style.display = "block";
+
+            } catch (err) {
+                console.error("Firestore write failed:", err);
+                alert("❌ Submission failed. Please try again or email us at viralclipaistudio@gmail.com\n\nError: " + err.message);
+
+                processPayBtn.disabled = false;
+                payText.innerText = "Submit UTR for Verification";
+                paySpinner.style.display = "none";
+                processPayBtn.style.background = "#000";
+            }
+        }
+    </script>
+
+    <footer class="vc-footer">
+      <div class="footer-content">
+        <p>&copy; 2026 ViralClip AI. All rights reserved.</p>
+        <div class="footer-links">
+          <a href="/terms.html" target="_blank" class="footer-link">Terms of Service</a>
+          <a href="/privacy.html" target="_blank" class="footer-link">Privacy Policy</a>
+          <a href="mailto:viralclipaistudio@gmail.com" class="footer-link">Support</a>
+        </div>
+      </div>
+    </footer>
+</body>
+</html>

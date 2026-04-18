@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>ViralClip AI | Turn Videos into Viral Shorts</title>
+        <link rel="icon" type="image/svg+xml" href="favicon.svg">
+        <style>
+            :root {
+                --bg: #0f1015;
+                --card-bg: #1a1b23;
+                --border: #2a2b36;
+                --primary: #6366f1;
+                --primary-hover: #4f46e5;
+                --text: #ffffff;
+                --text-muted: #9ca3af;
+                --accent: #4ade80;
+            }
+
+            body {
+                margin: 0;
+                font-family:
+                    system-ui,
+                    -apple-system,
+                    sans-serif;
+                background: var(--bg);
+                color: var(--text);
+                line-height: 1.6;
+            }
+
+            /* Navigation */
+            nav {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 20px 5%;
+                border-bottom: 1px solid var(--border);
+                background: rgba(26, 27, 35, 0.9);
+                position: sticky;
+                top: 0;
+                z-index: 100;
+                backdrop-filter: blur(10px);
+            }
+            .logo {
+                font-size: 24px;
+                font-weight: bold;
+                color: white;
+                text-decoration: none;
+                letter-spacing: -0.5px;
+            }
+            .logo span {
+                color: var(--primary);
+            }
+            .nav-links a {
+                color: var(--text);
+                text-decoration: none;
+                margin-left: 20px;
+                font-size: 15px;
+                font-weight: 500;
+                transition: color 0.2s;
+            }
+            .nav-links a:hover {
+                color: var(--primary);
+            }
+
+            /* Hero Section */
+            .hero {
+                text-align: center;
+                padding: 80px 20px;
+                max-width: 900px;
+                margin: 0 auto;
+            }
+            .hero-badge {
+                display: inline-block;
+                background: rgba(99, 102, 241, 0.1);
+                border: 1px solid var(--primary);
+                color: var(--primary);
+                padding: 6px 16px;
+                border-radius: 50px;
+                font-size: 13px;
+                font-weight: bold;
+                margin-bottom: 20px;
+                letter-spacing: 1px;
+            }
+            .hero h1 {
+                font-size: clamp(36px, 5vw, 64px);
+                margin: 0 0 20px 0;
+                line-height: 1.1;
+                letter-spacing: -1px;
+            }
+            .hero h1 span {
+                background: linear-gradient(to right, #6366f1, #a855f7);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }
+            .hero p {
+                font-size: clamp(16px, 2vw, 20px);
+                color: var(--text-muted);
+                margin: 0 auto 40px auto;
+                max-width: 600px;
+            }
+
+            /* Buttons */
+            .btn {
+                padding: 14px 28px;
+                border-radius: 8px;
+                font-weight: bold;
+                text-decoration: none;
+                font-size: 16px;
+                transition: all 0.2s;
+                border: none;
+                cursor: pointer;
+                display: inline-block;
+            }
+            .btn-primary {
+                background: var(--primary);
+                color: white;
+                box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+            }
+            .btn-primary:hover {
+                background: var(--primary-hover);
+                transform: translateY(-2px);
+            }
+            .btn-outline {
+                background: transparent;
+                border: 1px solid var(--border);
+                color: white;
+                margin-left: 10px;
+            }
+            .btn-outline:hover {
+                border-color: var(--text-muted);
+            }
+
+            /* Features Grid */
+            .features {
+                padding: 60px 20px;
+                background: var(--card-bg);
+                border-top: 1px solid var(--border);
+            }
+            .features-container {
+                max-width: 1000px;
+                margin: 0 auto;
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                gap: 30px;
+            }
+            .feature-card {
+                background: var(--bg);
+                border: 1px solid var(--border);
+                padding: 30px;
+                border-radius: 16px;
+                text-align: left;
+            }
+            .feature-icon {
+                font-size: 32px;
+                margin-bottom: 15px;
+            }
+            .feature-card h3 {
+                margin: 0 0 10px 0;
+                font-size: 20px;
+            }
+            .feature-card p {
+                color: var(--text-muted);
+                margin: 0;
+                font-size: 15px;
+            }
+
+            /* Footer */
+            footer {
+                text-align: center;
+                padding: 40px 20px;
+                border-top: 1px solid var(--border);
+                color: var(--text-muted);
+                font-size: 14px;
+            }
+            .vc-footer {
+                background-color: #0f0f13;
+                border-top: 1px solid rgba(168, 85, 247, 0.2);
+                padding: 1.5rem 1rem;
+                text-align: center;
+                font-family: inherit;
+                width: 100%;
+                margin-top: 40px;
+            }
+            .footer-content {
+                max-width: 800px;
+                margin: 0 auto;
+                display: flex;
+                flex-direction: column;
+                gap: 1rem;
+                align-items: center;
+            }
+            .footer-content p {
+                color: #888;
+                font-size: 0.85rem;
+                margin: 0;
+            }
+            .footer-links {
+                display: flex;
+                gap: 1.5rem;
+                justify-content: center;
+            }
+            .footer-link {
+                color: #ccc;
+                text-decoration: none;
+                font-size: 0.85rem;
+                transition: all 0.3s ease;
+            }
+            .footer-link:hover {
+                color: #a855f7;
+                text-shadow: 0 0 10px rgba(168, 85, 247, 0.4);
+            }
+        </style>
+    </head>
+    <body>
+        <nav>
+            <div class="logo">ViralClip <span>AI</span></div>
+            <div class="nav-links">
+                <a href="./signin.html">Login</a>
+                <a
+                    href="./signin.html"
+                    class="btn btn-primary"
+                    style="
+                        padding: 8px 16px;
+                        margin-left: 15px;
+                        font-size: 14px;
+                    "
+                    >Get Started</a
+                >
+            </div>
+        </nav>
+
+        <header class="hero">
+            <div class="hero-badge">PHASE 1 PROTOTYPE LIVE</div>
+            <h1>
+                Turn any video into a <span>Viral Short</span> automatically.
+            </h1>
+            <p>
+                Upload a video, and our AI will track the faces, crop it to a
+                perfect 9:16 vertical ratio, and add stunning Zack D. style 3D
+                captions in seconds.
+            </p>
+
+            <div>
+                <a href="./signin.html" class="btn btn-primary"
+                    >Start Creating for Free</a
+                >
+                <a href="#features" class="btn btn-outline">See Features</a>
+            </div>
+        </header>
+
+        <section id="features" class="features">
+            <div class="features-container">
+                <div class="feature-card">
+                    <div class="feature-icon">📱</div>
+                    <h3>Auto Reframe (9:16)</h3>
+                    <p>
+                        Never worry about cropping. The AI automatically detects
+                        faces and centers them in a mobile-perfect 9:16 aspect
+                        ratio.
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">✨</div>
+                    <h3>Zack D. Caption Styles</h3>
+                    <p>
+                        Choose between high-energy Kinetic typography or clean,
+                        Bold Static fonts designed for clinical and scientific
+                        clarity.
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h3>Instant Generation</h3>
+                    <p>
+                        Go from a raw MP4 to a ready-to-post viral video
+                        instantly. Save your defaults and streamline your entire
+                        content workflow.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <footer class="vc-footer">
+          <div class="footer-content">
+            <p>&copy; 2026 ViralClip AI. All rights reserved.</p>
+            <div class="footer-links">
+              <a href="/terms.html" target="_blank" class="footer-link">Terms of Service</a>
+              <a href="/privacy.html" target="_blank" class="footer-link">Privacy Policy</a>
+              <a href="mailto:viralclipaistudio@gmail.com" class="footer-link">Support</a>
+            </div>
+          </div>
+        </footer>
+    </body>
+</html>
