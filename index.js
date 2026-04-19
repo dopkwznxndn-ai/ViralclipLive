@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-const { exec, execSync } = require('child_process');
+const { exec } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
@@ -41,13 +41,15 @@ try {
     fs.chmodSync(ytDlpBin, '755');
     console.log('✅ Render Fix: yt-dlp execute permissions granted');
     
-    // THE NEW AUTO-UPDATER: Forces yt-dlp to update itself to beat YouTube's latest blocks
     console.log('🔄 Auto-updating yt-dlp to beat YouTube changes...');
     try {
-       const updateLog = execSync(`"${ytDlpBin}" -U`).toString();
-       console.log('✅ yt-dlp update status:', updateLog.trim());
+       // Using standard exec to avoid the duplicate execSync import crash
+       exec(`"${ytDlpBin}" -U`, (err, stdout, stderr) => {
+           if (err) console.log('⚠️ yt-dlp update skipped:', err.message);
+           else console.log('✅ yt-dlp update status:', stdout.trim());
+       });
     } catch (updErr) {
-       console.log('⚠️ yt-dlp auto-update skipped or failed (it might already be latest):', updErr.message);
+       console.log('⚠️ yt-dlp update error:', updErr.message);
     }
   }
 } catch (e) {
@@ -166,7 +168,6 @@ app.post('/api/process-video', async (req, res) => {
   try {
     console.log('⬇️ Downloading audio (with cookies, android disguise removed)...');
     const cookieArg = fs.existsSync(COOKIE_FILE) ? `--cookies "${COOKIE_FILE}"` : '';
-    // FIXED: Removed --extractor-args so it doesn't conflict with cookies
     await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" ${cookieArg} -f "bestaudio/best" -x --audio-format mp3 --no-check-certificate --no-playlist -o "/tmp/audio_${id}.%(ext)s" "${originalUrl}"`, { timeout: 120000 });
 
     console.log('⬆️ Uploading to AssemblyAI...');
@@ -210,7 +211,6 @@ app.post('/api/process-video', async (req, res) => {
     if (top5.length === 0) top5.push({ text: 'Highlight', rank: 0, start: 0, end: 30000, paddedStart: 0 });
 
     console.log('⬇️ Downloading video (with cookies, android disguise removed)...');
-    // FIXED: Removed --extractor-args here too
     await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" ${cookieArg} -f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --no-check-certificate --no-playlist --merge-output-format mp4 -o "${videoRaw}" "${originalUrl}"`, { timeout: 300000 });
 
     if (!fs.existsSync(videoRaw) || fs.statSync(videoRaw).size === 0) throw new Error('Source video missing!');
@@ -348,4 +348,4 @@ function startServer(attempt = 1) {
   });
 }
 startServer();
-                 
+                         
