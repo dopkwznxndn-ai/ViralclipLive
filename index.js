@@ -51,41 +51,41 @@ function generateClipASS(words, startMs, endMs) {
   return ASS_HEADER + events;
 }
 
-// ─── THE CORRECTED PROXY URL GENERATOR ────────────────────────────────
-async function getStreamUrl(videoUrl, isAudio) {
-  const payload = { 
-    url: videoUrl, 
-    videoQuality: "1080", 
-    downloadMode: isAudio ? "audio" : "auto" 
-  };
-  if (isAudio) payload.audioFormat = "mp3";
+function extractVideoId(url) {
+  const match = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/)|youtu\.be\/)([^"&?\/\s]{11})/);
+  return match ? match[1] : null;
+}
 
-  // Added necessary Headers so Cobalt knows we aren't a malicious bot
-  const headers = { 
-    'Accept': 'application/json', 
-    'Content-Type': 'application/json',
-    'Origin': 'https://cobalt.tools',
-    'Referer': 'https://cobalt.tools/',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-  };
-  
-  // FIXED: Added the required /api/json endpoint to the URLs
+// ─── THE PIPED API STREAM NETWORK ───────────────────────────────────────
+async function getPipedStreams(videoId) {
   const instances = [
-    'https://api.cobalt.tools/api/json',
-    'https://co.wuk.sh/api/json',
-    'https://cobalt.owo.network/api/json'
+    'https://pipedapi.kavin.rocks',
+    'https://api.piped.projectsegfau.lt',
+    'https://pipedapi.adminforge.de',
+    'https://pipedapi.smnz.de'
   ];
 
   for (const instance of instances) {
     try {
-      const res = await axios.post(instance, payload, { headers, timeout: 25000 });
-      if (res.data && res.data.url) return res.data.url;
+      console.log(`  ▶️ Connecting to Master Node: ${instance}...`);
+      const res = await axios.get(`${instance}/streams/${videoId}`, { timeout: 15000 });
+      
+      if (res.data && res.data.audioStreams && res.data.videoStreams) {
+        // Grab best audio
+        const audio = res.data.audioStreams.find(s => s.mimeType.includes('mp4a')) || res.data.audioStreams[0];
+        // Grab 1080p video (or fallback to 720p)
+        const video = res.data.videoStreams.find(s => s.quality === '1080p' && s.videoOnly === true && s.mimeType.includes('mp4')) 
+                   || res.data.videoStreams.find(s => s.quality === '720p' && s.videoOnly === true) 
+                   || res.data.videoStreams[0];
+        
+        console.log(`  ✅ Successfully secured Piped Stream URLs!`);
+        return { audioUrl: audio.url, videoUrl: video.url };
+      }
     } catch (e) { 
-      console.log(`Bypassing busy instance:`, e.message);
-      continue; 
+      console.log(`  ⚠️ Node busy, jumping to next...`);
     }
   }
-  throw new Error("Tunnels are currently syncing. Please wait a minute and try again.");
+  throw new Error("All Piped network APIs are down. Please check if the video is age-restricted or private.");
 }
 
 async function downloadToDisk(url, dest) {
@@ -100,17 +100,21 @@ async function downloadToDisk(url, dest) {
 
 app.post('/api/process-video', async (req, res) => {
   const { url: originalUrl } = req.body;
+  
+  const videoId = extractVideoId(originalUrl);
+  if (!videoId) return res.status(400).json({ status: 'error', message: 'Invalid YouTube link.' });
+
   const id = Date.now();
   const audioPath = `/tmp/a_${id}.mp3`, outputDir = path.join(__dirname, 'outputs');
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
   try {
-    // 1. Download only the tiny Audio file for AI Analysis
-    console.log('⬇️ Fetching Audio Track...');
-    const aUrl = await getStreamUrl(originalUrl, true);
-    await downloadToDisk(aUrl, audioPath);
+    console.log('⬇️ Bypassing YouTube via Piped API...');
+    const streams = await getPipedStreams(videoId);
+
+    console.log('⬇️ Downloading lightweight audio track for AI...');
+    await downloadToDisk(streams.audioUrl, audioPath);
     
-    // 2. AI Transcription
     console.log('🎙️ AI Analyzing Viral Moments...');
     const { data: up } = await axios.post('https://api.assemblyai.com/v2/upload', fs.readFileSync(audioPath), {
       headers: { authorization: process.env.ASSEMBLY_AI_API_KEY, 'Content-Type': 'application/octet-stream' }
@@ -121,16 +125,10 @@ app.post('/api/process-video', async (req, res) => {
     }, { headers: { authorization: process.env.ASSEMBLY_AI_API_KEY } });
     
     const transcript = await waitForTranscript(tr.id);
-
-    // 3. THE SNIPER TRICK: Get the video URL but DO NOT download it to the server!
-    console.log('⬇️ Connecting to 1080p Video Stream...');
-    const vUrl = await getStreamUrl(originalUrl, false);
-
     const highlights = (transcript.auto_highlights_result?.results || []).slice(0, 3);
     const clips = [];
 
-    // 4. Network Stream Rendering
-    console.log('🎬 Snipping 30s clips directly from the internet...');
+    console.log('🎬 Snipping 1080p clips directly from the network stream...');
     for (let i = 0; i < highlights.length; i++) {
       const h = highlights[i];
       const start = Math.max(0, h.timestamps[0].start / 1000);
@@ -140,9 +138,9 @@ app.post('/api/process-video', async (req, res) => {
       const ass = `/tmp/c_${id}_${i}.ass`;
       fs.writeFileSync(ass, generateClipASS(transcript.words || [], start * 1000, (start + 30) * 1000));
 
-      // FFmpeg pulls the exact 30 seconds directly from the network stream
+      // Dual-Stream Network Sniper: Downloads only 30s of Video AND 30s of Audio directly from the URLs
       const vf = `crop=ih*9/16:ih,scale=1080:1920,subtitles='${ass}':fontsdir='${path.join(__dirname, 'fonts')}'`;
-      await execAsync(`"${ffmpegBin}" -ss ${start} -i "${vUrl}" -t 30 -vf "${vf}" -c:v libx264 -preset veryfast -crf 24 -c:a aac -y "${outPath}"`, { timeout: 300000 });
+      await execAsync(`"${ffmpegBin}" -ss ${start} -i "${streams.videoUrl}" -ss ${start} -i "${streams.audioUrl}" -t 30 -vf "${vf}" -c:v libx264 -preset veryfast -crf 24 -c:a aac -y "${outPath}"`, { timeout: 300000 });
       
       clips.push({ clipUrl: `/outputs/${outName}`, text: h.text });
     }
@@ -161,4 +159,4 @@ app.post('/api/download-history', (req, res) => {
   else res.status(404).send('Not found');
 });
 
-app.listen(process.env.PORT || 5000, () => console.log('ViralClip Sniper Engine Ready'));
+app.listen(process.env.PORT || 5000, () => console.log('ViralClip Pure Stream Engine Ready'));
