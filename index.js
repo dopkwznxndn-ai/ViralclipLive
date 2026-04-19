@@ -36,12 +36,11 @@ const execAsync = promisify(exec);
 const ytDlpBin  = path.join(__dirname, 'yt-dlp');
 
 try {
-  if (fs.existsSync(ytDlpBin)) {
-    fs.chmodSync(ytDlpBin, '755');
-    console.log('✅ Render Fix: yt-dlp execute permissions granted');
-  }
+  console.log('🔄 Verifying yt-dlp binary permissions...');
+  fs.chmodSync(ytDlpBin, '755');
+  console.log('✅ yt-dlp permissions granted!');
 } catch (e) {
-  console.warn('⚠️ Render Fix Warning:', e.message);
+  console.error('⚠️ Failed to set yt-dlp permissions:', e.message);
 }
 
 const app = express();
@@ -136,38 +135,72 @@ const ENCODE_QUALITY = {
 
 const FONT_DIR = path.join(__dirname, 'fonts');
 
-// ─── THE GHOST PROXY BYPASS ───────────────────────────────────────────────
+// ─── THE TITANIUM DOWNLOADER WITH FILE SIZE VALIDATION ───────────────────
 async function robustDownload(url, outputStr, isAudio) {
+  const actualOutput = outputStr.replace('.%(ext)s', isAudio ? '.mp3' : '.mp4');
+  
   const formatArg = isAudio 
     ? '-f "bestaudio/best" -x --audio-format mp3' 
     : '-f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --merge-output-format mp4';
 
-  const actualOutput = outputStr.replace('.%(ext)s', isAudio ? '.mp3' : '');
+  const strategies = [
+    `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" --force-ipv4 --extractor-args "youtube:player_client=android_creator,tv" ${formatArg} --no-check-certificate --no-playlist -o "${outputStr}" "${url}"`,
+    `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" --force-ipv4 --extractor-args "youtube:player_client=ios,web" ${formatArg} --no-check-certificate --no-playlist -o "${outputStr}" "${url}"`
+  ];
 
-  try {
-    console.log(`  ▶️ Attempting Native Download...`);
-    await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" ${formatArg} --no-check-certificate --no-playlist -o "${outputStr}" "${url}"`, { timeout: 300000 });
-  } catch (err1) {
-    console.log(`  ⚠️ IP Block Detected. Deploying Ghost API Proxy...`);
-    
-    const payload = { url: url, isAudioOnly: isAudio, vQuality: "1080" };
-    if (isAudio) payload.aFormat = "mp3";
-
-    try {
-        const response = await axios.post('https://co.wuk.sh/api/json', payload, {
-            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }
-        });
-        await execAsync(`curl -L "${response.data.url}" -o "${actualOutput}"`, { timeout: 300000 });
-        console.log(`  ✅ Ghost API Primary Success!`);
-    } catch (err2) {
-        console.log(`  ⚠️ Primary Node Failed. Deploying Secondary Ghost Node...`);
-        const response = await axios.post('https://api.cobalt.tools/api/json', payload, {
-            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }
-        });
-        await execAsync(`curl -L "${response.data.url}" -o "${actualOutput}"`, { timeout: 300000 });
-        console.log(`  ✅ Ghost API Secondary Success!`);
-    }
+  for (let i = 0; i < strategies.length; i++) {
+     try {
+         console.log(`  ▶️ Attempting Native Strategy ${i+1}...`);
+         await execAsync(strategies[i], { timeout: 300000 });
+         
+         let files = fs.readdirSync('/tmp/').filter(f => f.startsWith(path.basename(outputStr).split('.')[0]));
+         if (files.length > 0) {
+             const downloadedFile = path.join('/tmp/', files[0]);
+             const stats = fs.statSync(downloadedFile);
+             if (stats.size > 50000) { // Must be larger than 50KB to prove it's not a fake HTML error page
+                 if (downloadedFile !== actualOutput) fs.renameSync(downloadedFile, actualOutput);
+                 console.log(`  ✅ Native Strategy ${i+1} Succeeded!`);
+                 return;
+             } else {
+                 console.log(`  ⚠️ File too small (fake file). Trashing...`);
+                 fs.unlinkSync(downloadedFile);
+             }
+         }
+     } catch(e) {
+         console.log(`  ⚠️ Strategy ${i+1} Failed.`);
+     }
   }
+
+  console.log(`  ⚠️ Native blocked. Deploying Cobalt V7 Master Nodes...`);
+  const payload = {
+      url: url,
+      downloadMode: isAudio ? "audio" : "auto",
+      videoQuality: "1080"
+  };
+  const headers = {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+  };
+  
+  const instances = ['https://api.cobalt.tools', 'https://co.wuk.sh', 'https://cobalt.owo.network'];
+  for (let instance of instances) {
+       try {
+           console.log(`  ▶️ Pinging Node: ${instance}...`);
+           const res = await axios.post(instance, payload, { headers, timeout: 15000 });
+           if (res.data && res.data.url) {
+               await execAsync(`curl -L "${res.data.url}" -o "${actualOutput}"`, { timeout: 300000 });
+               if (fs.existsSync(actualOutput) && fs.statSync(actualOutput).size > 50000) {
+                   console.log(`  ✅ Ghost Node Succeeded!`);
+                   return;
+               }
+           }
+       } catch(e) {
+           console.log(`  ⚠️ Ghost Node Failed.`);
+       }
+  }
+
+  throw new Error("YouTube aggressively blocked the download, and all proxy fallback servers failed to bypass it. Please wait 30 minutes and try again.");
 }
 
 app.post('/api/process-video', async (req, res) => {
@@ -188,15 +221,9 @@ app.post('/api/process-video', async (req, res) => {
   const cleanup  = () => tmpFiles.forEach(f => { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {} });
 
   try {
-    console.log('⬇️ Executing Audio Fetch...');
+    console.log('⬇️ Executing Audio Fetch Phase...');
     await robustDownload(originalUrl, `/tmp/audio_${id}.%(ext)s`, true);
     
-    // Rename fallback in case the proxy downloaded without the proper extension
-    if (!fs.existsSync(audioPath)) {
-       const potentialFiles = fs.readdirSync('/tmp/').filter(f => f.startsWith(`audio_${id}`));
-       if (potentialFiles.length > 0) fs.renameSync(path.join('/tmp/', potentialFiles[0]), audioPath);
-    }
-
     console.log('⬆️ Uploading to AssemblyAI...');
     const audioData = fs.readFileSync(audioPath);
     const { data: uploadData } = await axios.post('https://api.assemblyai.com/v2/upload', audioData, {
@@ -239,8 +266,6 @@ app.post('/api/process-video', async (req, res) => {
 
     console.log('⬇️ Executing Video Fetch Phase...');
     await robustDownload(originalUrl, videoRaw, false);
-
-    if (!fs.existsSync(videoRaw) || fs.statSync(videoRaw).size === 0) throw new Error('Source video missing. Both primary and proxy systems were blocked.');
 
     const clips = [];
     console.log('🎬 Rendering clips...');
@@ -375,4 +400,3 @@ function startServer(attempt = 1) {
   });
 }
 startServer();
-                           
