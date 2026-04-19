@@ -34,6 +34,7 @@ const upload = multer({
 
 const execAsync = promisify(exec);
 const ytDlpBin  = path.join(__dirname, 'yt-dlp');
+const COOKIE_FILE = path.join(__dirname, 'cookies.txt');
 
 try {
   if (fs.existsSync(ytDlpBin)) {
@@ -58,7 +59,6 @@ app.get('/', (req, res) => res.redirect('/dashboard.html'));
 
 async function waitForTranscript(transcriptId) {
   const url = `https://api.assemblyai.com/v2/transcript/${transcriptId}`;
-  // FIXED: Looking for the correct Render variable name
   const headers = { authorization: process.env.ASSEMBLY_AI_API_KEY };
   while (true) {
     const { data } = await axios.get(url, { headers });
@@ -155,18 +155,17 @@ app.post('/api/process-video', async (req, res) => {
   const cleanup  = () => tmpFiles.forEach(f => { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {} });
 
   try {
-    console.log('⬇️ Downloading audio...');
-    await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" -f "bestaudio/best" -x --audio-format mp3 --extractor-args "youtube:player_client=android,web" --no-check-certificate --no-playlist -o "/tmp/audio_${id}.%(ext)s" "${originalUrl}"`, { timeout: 120000 });
+    console.log('⬇️ Downloading audio (with cookies)...');
+    const cookieArg = fs.existsSync(COOKIE_FILE) ? `--cookies "${COOKIE_FILE}"` : '';
+    await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" ${cookieArg} -f "bestaudio/best" -x --audio-format mp3 --extractor-args "youtube:player_client=android,web" --no-check-certificate --no-playlist -o "/tmp/audio_${id}.%(ext)s" "${originalUrl}"`, { timeout: 120000 });
 
     console.log('⬆️ Uploading to AssemblyAI...');
     const audioData = fs.readFileSync(audioPath);
-    // FIXED: Corrected API key name
     const { data: uploadData } = await axios.post('https://api.assemblyai.com/v2/upload', audioData, {
       headers: { authorization: process.env.ASSEMBLY_AI_API_KEY, 'Content-Type': 'application/octet-stream' }, maxBodyLength: Infinity,
     });
 
     console.log('🎙️ Transcribing...');
-    // FIXED: Corrected API key name
     const { data: transcriptData } = await axios.post('https://api.assemblyai.com/v2/transcript', {
       audio_url: uploadData.upload_url, speech_models: ['universal-2'], language_code: 'en', auto_highlights: true,
     }, { headers: { authorization: process.env.ASSEMBLY_AI_API_KEY } });
@@ -200,8 +199,8 @@ app.post('/api/process-video', async (req, res) => {
 
     if (top5.length === 0) top5.push({ text: 'Highlight', rank: 0, start: 0, end: 30000, paddedStart: 0 });
 
-    console.log('⬇️ Downloading video...');
-    await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" -f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --extractor-args "youtube:player_client=android,web" --no-check-certificate --no-playlist --merge-output-format mp4 -o "${videoRaw}" "${originalUrl}"`, { timeout: 300000 });
+    console.log('⬇️ Downloading video (with cookies)...');
+    await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" ${cookieArg} -f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --extractor-args "youtube:player_client=android,web" --no-check-certificate --no-playlist --merge-output-format mp4 -o "${videoRaw}" "${originalUrl}"`, { timeout: 300000 });
 
     if (!fs.existsSync(videoRaw) || fs.statSync(videoRaw).size === 0) throw new Error('Source video missing!');
 
@@ -254,7 +253,6 @@ app.post('/api/process-video', async (req, res) => {
     res.json({ status: 'success', transcriptId: transcriptData.id, clips });
   } catch (err) {
     cleanup();
-    // FIXED: Forces frontend to display the exact cause of the crash
     res.status(500).json({ status: 'error', message: err.message, error: err.message });
   }
 });
@@ -339,3 +337,4 @@ function startServer(attempt = 1) {
   });
 }
 startServer();
+                               
