@@ -10,7 +10,6 @@ const ffmpegBin = require('ffmpeg-static');
 const ffmpeg = require('fluent-ffmpeg');
 const multer = require('multer');
 const admin = require('firebase-admin');
-const { getFaceTrackFractions, buildCropXExpression } = require('./facetrack');
 
 ffmpeg.setFfmpegPath(ffmpegBin);
 
@@ -34,13 +33,15 @@ const upload = multer({
 
 const execAsync = promisify(exec);
 const ytDlpBin  = path.join(__dirname, 'yt-dlp');
+const COOKIE_FILE = path.join(__dirname, 'cookies.txt');
 
 try {
-  console.log('🔄 Verifying yt-dlp binary permissions...');
+  console.log('🔄 Force-downloading the absolute latest yt-dlp binary from GitHub...');
+  execSync(`curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "${ytDlpBin}"`);
   fs.chmodSync(ytDlpBin, '755');
-  console.log('✅ yt-dlp permissions granted!');
+  console.log('✅ yt-dlp updated and permissions granted!');
 } catch (e) {
-  console.error('⚠️ Failed to set yt-dlp permissions:', e.message);
+  console.error('⚠️ Failed to setup yt-dlp:', e.message);
 }
 
 const app = express();
@@ -60,11 +61,7 @@ async function waitForTranscript(transcriptId) {
   const headers = { authorization: process.env.ASSEMBLY_AI_API_KEY };
   while (true) {
     const { data } = await axios.get(url, { headers });
-    if (data.status === 'completed') return {
-      text: data.text,
-      words: data.words,
-      auto_highlights_result: data.auto_highlights_result,
-    };
+    if (data.status === 'completed') return { text: data.text, words: data.words, auto_highlights_result: data.auto_highlights_result };
     if (data.status === 'error') throw new Error(`AssemblyAI error: ${data.error}`);
     await new Promise(r => setTimeout(r, 5000));
   }
@@ -108,19 +105,17 @@ function generateMicroASS(words) {
 }
 
 function generateClipASS(words, startMs, endMs) {
-  const clipWords = words
-    .filter(w => w.start >= startMs && w.end <= endMs)
-    .map(w => ({ ...w, start: w.start - startMs, end: w.end - startMs }));
+  const clipWords = words.filter(w => w.start >= startMs && w.end <= endMs).map(w => ({ ...w, start: w.start - startMs, end: w.end - startMs }));
   return generateMicroASS(clipWords);
 }
 
-const FREE_PLANS    = new Set(['free', 'free_permanent']);
-const WMARK_PNG     = path.join(__dirname, 'public', 'watermark.png');
+const FREE_PLANS = new Set(['free', 'free_permanent']);
+const WMARK_PNG  = path.join(__dirname, 'public', 'watermark.png');
 
 function needsWatermark(plan) { return FREE_PLANS.has(plan); }
 
 const RESOLUTION_SCALE = {
-  '360p':  '360:640', '720p':  '720:1280', '1080p': '1080:1920', '1440p': '1440:2560', '4k':    '2160:3840',
+  '360p': '360:640', '720p': '720:1280', '1080p': '1080:1920', '1440p': '1440:2560', '4k': '2160:3840',
 };
 
 const ENCODE_QUALITY = {
@@ -134,85 +129,6 @@ const ENCODE_QUALITY = {
 };
 
 const FONT_DIR = path.join(__dirname, 'fonts');
-
-// ─── THE TITANIUM DOWNLOADER WITH V7 COBALT & SIZE VALIDATION ────────────
-async function robustDownload(url, outputStr, isAudio) {
-  const actualOutput = outputStr.replace('.%(ext)s', isAudio ? '.mp3' : '.mp4');
-  
-  const formatArg = isAudio 
-    ? '-f "bestaudio/best" -x --audio-format mp3' 
-    : '-f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --merge-output-format mp4';
-
-  const strategies = [
-    `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" --extractor-args "youtube:player_client=ios,web" ${formatArg} --no-check-certificate --no-playlist -o "${outputStr}" "${url}"`,
-    `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" --extractor-args "youtube:player_client=android_creator,tv" ${formatArg} --no-check-certificate --no-playlist -o "${outputStr}" "${url}"`
-  ];
-
-  for (let i = 0; i < strategies.length; i++) {
-     try {
-         console.log(`  ▶️ Attempting Native Strategy ${i+1}...`);
-         await execAsync(strategies[i], { timeout: 300000 });
-         
-         let files = fs.readdirSync('/tmp/').filter(f => f.startsWith(path.basename(outputStr).split('.')[0]));
-         if (files.length > 0) {
-             const downloadedFile = path.join('/tmp/', files[0]);
-             const stats = fs.statSync(downloadedFile);
-             if (stats.size > 50000) { // Must be larger than 50KB to prove it's a real file
-                 if (downloadedFile !== actualOutput) fs.renameSync(downloadedFile, actualOutput);
-                 console.log(`  ✅ Native Strategy ${i+1} Succeeded!`);
-                 return;
-             } else {
-                 console.log(`  ⚠️ File too small. Trashing fake file...`);
-                 fs.unlinkSync(downloadedFile);
-             }
-         }
-     } catch(e) {
-         console.log(`  ⚠️ Strategy ${i+1} Failed.`);
-     }
-  }
-
-  console.log(`  ⚠️ Native blocked. Deploying Cobalt V7 Master Nodes...`);
-  
-  // FIXED: Converted payload to strictly follow the new V7 formatting
-  const payload = isAudio 
-      ? { url: url, isAudioOnly: true, audioFormat: "mp3" }
-      : { url: url, videoQuality: "1080", isAudioOnly: false };
-
-  const headers = {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      'Origin': 'https://cobalt.tools',
-      'Referer': 'https://cobalt.tools/',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-  };
-  
-  const instances = [
-      'https://co.wuk.sh/api/json',
-      'https://cobalt.owo.network/api/json',
-      'https://api.cobalt.tools/api/json',
-      'https://cobalt-api.kwiatekm.dev/api/json'
-  ];
-
-  for (let instance of instances) {
-       try {
-           console.log(`  ▶️ Pinging Node: ${instance}...`);
-           const res = await axios.post(instance, payload, { headers, timeout: 15000 });
-           if (res.data && res.data.url) {
-               await execAsync(`curl -L "${res.data.url}" -o "${actualOutput}"`, { timeout: 300000 });
-               if (fs.existsSync(actualOutput) && fs.statSync(actualOutput).size > 50000) {
-                   console.log(`  ✅ Ghost Node Succeeded!`);
-                   return;
-               } else {
-                   if (fs.existsSync(actualOutput)) fs.unlinkSync(actualOutput);
-               }
-           }
-       } catch(e) {
-           console.log(`  ⚠️ Ghost Node Failed:`, e.response ? e.response.status : e.message);
-       }
-  }
-
-  throw new Error("YouTube aggressively blocked the download, and all proxy fallback servers failed to bypass it. Please wait 30 minutes and try again.");
-}
 
 app.post('/api/process-video', async (req, res) => {
   const originalUrl  = req.body.url;
@@ -232,8 +148,12 @@ app.post('/api/process-video', async (req, res) => {
   const cleanup  = () => tmpFiles.forEach(f => { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {} });
 
   try {
-    console.log('⬇️ Executing Audio Fetch Phase...');
-    await robustDownload(originalUrl, `/tmp/audio_${id}.%(ext)s`, true);
+    const cookieArg = fs.existsSync(COOKIE_FILE) ? `--cookies "${COOKIE_FILE}"` : '';
+    if (!cookieArg) console.log("⚠️ WARNING: cookies.txt not found! Downloads will likely be blocked by YouTube.");
+
+    // Using Pure Web Client matching the Kiwi Browser cookies exactly
+    console.log('⬇️ Executing Pure Cookie Audio Fetch...');
+    await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" ${cookieArg} --extractor-args "youtube:player_client=web" -f "bestaudio/best" -x --audio-format mp3 --no-check-certificate --no-playlist -o "/tmp/audio_${id}.%(ext)s" "${originalUrl}"`, { timeout: 120000 });
     
     console.log('⬆️ Uploading to AssemblyAI...');
     const audioData = fs.readFileSync(audioPath);
@@ -275,8 +195,8 @@ app.post('/api/process-video', async (req, res) => {
 
     if (top5.length === 0) top5.push({ text: 'Highlight', rank: 0, start: 0, end: 30000, paddedStart: 0 });
 
-    console.log('⬇️ Executing Video Fetch Phase...');
-    await robustDownload(originalUrl, videoRaw, false);
+    console.log('⬇️ Executing Pure Cookie Video Fetch...');
+    await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" ${cookieArg} --extractor-args "youtube:player_client=web" -f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --no-check-certificate --no-playlist --merge-output-format mp4 -o "${videoRaw}" "${originalUrl}"`, { timeout: 300000 });
 
     const clips = [];
     console.log('🎬 Rendering clips...');
@@ -323,7 +243,7 @@ app.post('/api/process-video', async (req, res) => {
     }
 
     cleanup();
-    if (clips.length === 0) return res.status(500).json({ status: 'error', message: 'No clips generated during final render phase.' });
+    if (clips.length === 0) return res.status(500).json({ status: 'error', message: 'No clips generated.' });
     res.json({ status: 'success', transcriptId: transcriptData.id, clips });
   } catch (err) {
     cleanup();
@@ -411,4 +331,4 @@ function startServer(attempt = 1) {
   });
 }
 startServer();
-                             
+                         
