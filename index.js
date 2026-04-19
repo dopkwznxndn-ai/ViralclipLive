@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-const { exec, execSync } = require('child_process');
+const { exec } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
@@ -32,17 +32,6 @@ const upload = multer({
 });
 
 const execAsync = promisify(exec);
-const ytDlpBin  = path.join(__dirname, 'yt-dlp');
-
-try {
-  console.log('🔄 Force-downloading the absolute latest yt-dlp binary...');
-  execSync(`curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "${ytDlpBin}"`);
-  fs.chmodSync(ytDlpBin, '755');
-  console.log('✅ yt-dlp updated and permissions granted!');
-} catch (e) {
-  console.error('⚠️ Failed to setup yt-dlp:', e.message);
-}
-
 const app = express();
 
 process.on('uncaughtException',  err => console.error('⚠️ Uncaught exception:', err.message));
@@ -129,38 +118,51 @@ const ENCODE_QUALITY = {
 
 const FONT_DIR = path.join(__dirname, 'fonts');
 
-// ─── THE MULTI-MATRIX IPV6 DOWNLOADER ──────────────────────────────────────
-async function robustYtDlp(url, outputStr, isAudio) {
-  const formatArg = isAudio 
-    ? '-f "bestaudio/best" -x --audio-format mp3' 
-    : '-f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --merge-output-format mp4';
+// ─── THE NEW DISTRIBUTED TUNNEL DOWNLOADER ───────────────────────────────
+async function cobaltTunnel(videoUrl, isAudio) {
+  const payload = {
+      url: videoUrl,
+      videoQuality: "1080",
+      downloadMode: isAudio ? "audio" : "auto"
+  };
+  const headers = {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+  };
+  
+  // Rotating matrix of completely unbanned proxy nodes
+  const instances = [
+      'https://co.wuk.sh',
+      'https://cobalt.owo.network',
+      'https://cobalt-api.kwiatekm.dev',
+      'https://api.cobalt.tools'
+  ];
 
-  const networks = ['--force-ipv6', '--force-ipv4'];
-  const clients = ['tv', 'ios', 'android_creator', 'web'];
-  const actualOutput = outputStr.replace('.%(ext)s', isAudio ? '.mp3' : '.mp4');
-
-  for (const net of networks) {
-    for (const client of clients) {
+  for (const instance of instances) {
       try {
-        console.log(`  ▶️ Attempting Matrix Bypass: ${net} routing with [${client}] client...`);
-        
-        await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" --rm-cache-dir ${net} --extractor-args "youtube:player_client=${client}" ${formatArg} --no-check-certificate --no-playlist -o "${outputStr}" "${url}"`, { timeout: 180000 });
-
-        let files = fs.readdirSync('/tmp/').filter(f => f.startsWith(path.basename(outputStr).split('.')[0]));
-        if (files.length > 0) {
-             const downloadedFile = path.join('/tmp/', files[0]);
-             if (fs.statSync(downloadedFile).size > 50000) { 
-                 if (downloadedFile !== actualOutput) fs.renameSync(downloadedFile, actualOutput);
-                 console.log(`  ✅ Success! Bypassed YouTube using ${net} + ${client} disguise.`);
-                 return;
-             }
-        }
+          console.log(`  ▶️ Pinging Proxy Tunnel: ${instance}...`);
+          const res = await axios.post(`${instance}/api/json`, payload, { headers, timeout: 20000 });
+          if (res.data && res.data.url) {
+              console.log(`  ✅ Tunnel connection established!`);
+              return res.data.url;
+          }
       } catch (e) {
-         console.log(`  ⚠️ Matrix ${client} block detected. Cycling to next disguise...`);
+          console.log(`  ⚠️ Proxy blocked, instantly rotating to next node...`);
+          continue;
       }
-    }
   }
-  throw new Error("All IPv6/IPv4 network routes and client combinations failed. YouTube is severely blocking this server IP.");
+  throw new Error("All proxy tunnels are temporarily overloaded. Please try again in 5 minutes.");
+}
+
+async function downloadToDisk(url, dest) {
+  const writer = fs.createWriteStream(dest);
+  const res = await axios({ url, method: 'GET', responseType: 'stream', timeout: 120000 });
+  res.data.pipe(writer);
+  return new Promise((resolve, reject) => {
+      writer.on('finish', () => resolve(dest));
+      writer.on('error', reject);
+  });
 }
 
 app.post('/api/process-video', async (req, res) => {
@@ -181,10 +183,11 @@ app.post('/api/process-video', async (req, res) => {
   const cleanup  = () => tmpFiles.forEach(f => { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {} });
 
   try {
-    console.log('⬇️ Executing Matrix Audio Fetch...');
-    await robustYtDlp(originalUrl, `/tmp/audio_${id}.%(ext)s`, true);
+    console.log('⬇️ Opening audio proxy tunnel...');
+    const audioTunnelUrl = await cobaltTunnel(originalUrl, true);
+    await downloadToDisk(audioTunnelUrl, audioPath);
     
-    console.log('⬆️ Uploading to AssemblyAI...');
+    console.log('⬆️ Uploading tunnel data to AssemblyAI...');
     const audioData = fs.readFileSync(audioPath);
     const { data: uploadData } = await axios.post('https://api.assemblyai.com/v2/upload', audioData, {
       headers: { authorization: process.env.ASSEMBLY_AI_API_KEY, 'Content-Type': 'application/octet-stream' }, maxBodyLength: Infinity,
@@ -224,11 +227,12 @@ app.post('/api/process-video', async (req, res) => {
 
     if (top5.length === 0) top5.push({ text: 'Highlight', rank: 0, start: 0, end: 30000, paddedStart: 0 });
 
-    console.log('⬇️ Executing Matrix Video Fetch...');
-    await robustYtDlp(originalUrl, videoRaw, false);
+    console.log('⬇️ Opening massive video proxy tunnel...');
+    const videoTunnelUrl = await cobaltTunnel(originalUrl, false);
+    await downloadToDisk(videoTunnelUrl, videoRaw);
 
     const clips = [];
-    console.log('🎬 Rendering clips...');
+    console.log('🎬 Rendering clips directly from tunnel stream...');
     for (let i = 0; i < top5.length; i++) {
       const hl = top5[i];
       const clipAssPath = `/tmp/captions_${id}_${i}.ass`;
@@ -360,4 +364,4 @@ function startServer(attempt = 1) {
   });
 }
 startServer();
-                                                                 
+                   
