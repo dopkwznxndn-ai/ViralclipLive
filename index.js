@@ -151,9 +151,11 @@ app.post('/api/process-video', async (req, res) => {
     const cookieArg = fs.existsSync(COOKIE_FILE) ? `--cookies "${COOKIE_FILE}"` : '';
     if (!cookieArg) console.log("⚠️ WARNING: cookies.txt not found! Downloads will likely be blocked by YouTube.");
 
-    // Using Pure Web Client matching the Kiwi Browser cookies exactly
-    console.log('⬇️ Executing Pure Cookie Audio Fetch...');
-    await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" ${cookieArg} --extractor-args "youtube:player_client=web" -f "bestaudio/best" -x --audio-format mp3 --no-check-certificate --no-playlist -o "/tmp/audio_${id}.%(ext)s" "${originalUrl}"`, { timeout: 120000 });
+    // THE MAGIC BYPASS: iOS Client + Cache Wipe
+    const baseArgs = `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" --rm-cache-dir ${cookieArg} --extractor-args "youtube:player_client=ios" --no-check-certificate --no-playlist`;
+
+    console.log('⬇️ Executing iOS Cookie Audio Fetch...');
+    await execAsync(`${baseArgs} -f "bestaudio/best" -x --audio-format mp3 -o "/tmp/audio_${id}.%(ext)s" "${originalUrl}"`, { timeout: 120000 });
     
     console.log('⬆️ Uploading to AssemblyAI...');
     const audioData = fs.readFileSync(audioPath);
@@ -195,8 +197,8 @@ app.post('/api/process-video', async (req, res) => {
 
     if (top5.length === 0) top5.push({ text: 'Highlight', rank: 0, start: 0, end: 30000, paddedStart: 0 });
 
-    console.log('⬇️ Executing Pure Cookie Video Fetch...');
-    await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" ${cookieArg} --extractor-args "youtube:player_client=web" -f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --no-check-certificate --no-playlist --merge-output-format mp4 -o "${videoRaw}" "${originalUrl}"`, { timeout: 300000 });
+    console.log('⬇️ Executing iOS Cookie Video Fetch...');
+    await execAsync(`${baseArgs} -f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --merge-output-format mp4 -o "${videoRaw}" "${originalUrl}"`, { timeout: 300000 });
 
     const clips = [];
     console.log('🎬 Rendering clips...');
@@ -331,4 +333,3 @@ function startServer(attempt = 1) {
   });
 }
 startServer();
-                         
