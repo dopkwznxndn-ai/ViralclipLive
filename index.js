@@ -34,16 +34,14 @@ const upload = multer({
 
 const execAsync = promisify(exec);
 const ytDlpBin  = path.join(__dirname, 'yt-dlp');
-const COOKIE_FILE = path.join(__dirname, 'cookies.txt');
 
-// ─── THE NUKE: Force-download the absolute newest yt-dlp binary ────────────
 try {
-  console.log('🔄 Force-downloading the bleeding-edge yt-dlp binary from GitHub...');
-  execSync(`curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "${ytDlpBin}"`);
-  fs.chmodSync(ytDlpBin, '755');
-  console.log('✅ yt-dlp forcefully updated and permissions granted!');
+  if (fs.existsSync(ytDlpBin)) {
+    fs.chmodSync(ytDlpBin, '755');
+    console.log('✅ Render Fix: yt-dlp execute permissions granted');
+  }
 } catch (e) {
-  console.error('⚠️ Failed to forcefully update yt-dlp:', e.message);
+  console.warn('⚠️ Render Fix Warning:', e.message);
 }
 
 const app = express();
@@ -138,26 +136,37 @@ const ENCODE_QUALITY = {
 
 const FONT_DIR = path.join(__dirname, 'fonts');
 
-// ─── THE TRIPLE-BYPASS DOWNLOADER ──────────────────────────────────────────
-async function robustDownload(url, output, isAudio) {
+// ─── THE GHOST PROXY BYPASS ───────────────────────────────────────────────
+async function robustDownload(url, outputStr, isAudio) {
   const formatArg = isAudio 
     ? '-f "bestaudio/best" -x --audio-format mp3' 
     : '-f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --merge-output-format mp4';
 
-  const cookieArg = fs.existsSync(COOKIE_FILE) ? `--cookies "${COOKIE_FILE}"` : '';
-
-  // Strategy 1: Use cookies (Might fail if it's a brand account)
-  const cmd1 = `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" ${cookieArg} ${formatArg} --no-check-certificate --no-playlist -o "${output}" "${url}"`;
-
-  // Strategy 2: Drop cookies, disguise as iOS/TV (Bypasses Data Sync ID errors)
-  const cmd2 = `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" --extractor-args "youtube:player_client=ios,tv" ${formatArg} --no-check-certificate --no-playlist -o "${output}" "${url}"`;
+  const actualOutput = outputStr.replace('.%(ext)s', isAudio ? '.mp3' : '');
 
   try {
-    console.log(`  ▶️ Attempting Strategy 1 (Cookies)...`);
-    await execAsync(cmd1, { timeout: 300000 });
+    console.log(`  ▶️ Attempting Native Download...`);
+    await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" ${formatArg} --no-check-certificate --no-playlist -o "${outputStr}" "${url}"`, { timeout: 300000 });
   } catch (err1) {
-    console.log(`  ⚠️ Strategy 1 Failed. Launching Strategy 2 (iOS Disguise)...`);
-    await execAsync(cmd2, { timeout: 300000 });
+    console.log(`  ⚠️ IP Block Detected. Deploying Ghost API Proxy...`);
+    
+    const payload = { url: url, isAudioOnly: isAudio, vQuality: "1080" };
+    if (isAudio) payload.aFormat = "mp3";
+
+    try {
+        const response = await axios.post('https://co.wuk.sh/api/json', payload, {
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }
+        });
+        await execAsync(`curl -L "${response.data.url}" -o "${actualOutput}"`, { timeout: 300000 });
+        console.log(`  ✅ Ghost API Primary Success!`);
+    } catch (err2) {
+        console.log(`  ⚠️ Primary Node Failed. Deploying Secondary Ghost Node...`);
+        const response = await axios.post('https://api.cobalt.tools/api/json', payload, {
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }
+        });
+        await execAsync(`curl -L "${response.data.url}" -o "${actualOutput}"`, { timeout: 300000 });
+        console.log(`  ✅ Ghost API Secondary Success!`);
+    }
   }
 }
 
@@ -179,10 +188,10 @@ app.post('/api/process-video', async (req, res) => {
   const cleanup  = () => tmpFiles.forEach(f => { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {} });
 
   try {
-    console.log('⬇️ Executing Audio Download Phase...');
+    console.log('⬇️ Executing Audio Fetch...');
     await robustDownload(originalUrl, `/tmp/audio_${id}.%(ext)s`, true);
     
-    // Rename fallback in case yt-dlp ignores the specific extension output
+    // Rename fallback in case the proxy downloaded without the proper extension
     if (!fs.existsSync(audioPath)) {
        const potentialFiles = fs.readdirSync('/tmp/').filter(f => f.startsWith(`audio_${id}`));
        if (potentialFiles.length > 0) fs.renameSync(path.join('/tmp/', potentialFiles[0]), audioPath);
@@ -228,10 +237,10 @@ app.post('/api/process-video', async (req, res) => {
 
     if (top5.length === 0) top5.push({ text: 'Highlight', rank: 0, start: 0, end: 30000, paddedStart: 0 });
 
-    console.log('⬇️ Executing Video Download Phase...');
+    console.log('⬇️ Executing Video Fetch Phase...');
     await robustDownload(originalUrl, videoRaw, false);
 
-    if (!fs.existsSync(videoRaw) || fs.statSync(videoRaw).size === 0) throw new Error('Source video missing after multiple fallback attempts!');
+    if (!fs.existsSync(videoRaw) || fs.statSync(videoRaw).size === 0) throw new Error('Source video missing. Both primary and proxy systems were blocked.');
 
     const clips = [];
     console.log('🎬 Rendering clips...');
@@ -366,4 +375,4 @@ function startServer(attempt = 1) {
   });
 }
 startServer();
-         
+                           
