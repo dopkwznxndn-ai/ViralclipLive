@@ -2,29 +2,21 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-const { exec, execSync } = require('child_process');
+const { exec } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
 const ffmpegBin = require('ffmpeg-static');
-const ffmpeg = require('fluent-ffmpeg');
 
-ffmpeg.setFfmpegPath(ffmpegBin);
 const execAsync = promisify(exec);
-const ytDlpBin = path.join(__dirname, 'yt-dlp');
-
-// ─── THE DIRECT PIPELINE SETUP ──────────────────────────────────────────
-try {
-  console.log('🔄 Installing High-Speed Downloader...');
-  execSync(`curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "${ytDlpBin}"`);
-  fs.chmodSync(ytDlpBin, '755');
-} catch (e) { console.error('Setup Error:', e.message); }
-
 const app = express();
+
 app.use(cors());
 app.use(express.static('public'));
 app.use('/outputs', express.static(path.join(__dirname, 'outputs')));
 app.use(express.json());
+
+app.get('/', (req, res) => res.redirect('/dashboard.html'));
 
 async function waitForTranscript(transcriptId) {
   const url = `https://api.assemblyai.com/v2/transcript/${transcriptId}`;
@@ -37,58 +29,127 @@ async function waitForTranscript(transcriptId) {
   }
 }
 
+function sanitizeCaptionText(raw) {
+  if (!raw) return null;
+  return raw.replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, ' ').trim() || null;
+}
+
 function ms2ass(ms) {
   const pad = (n, len = 2) => String(n).padStart(len, '0');
   const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000), s = Math.floor((ms % 60000) / 1000), cs = Math.floor((ms % 1000) / 10);
   return `${h}:${pad(m)}:${pad(s)}.${pad(cs)}`;
 }
 
+const ASS_HEADER = `[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,BebasNeue,80,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,0,2,10,10,60,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
+
+function generateClipASS(words, startMs, endMs) {
+  let events = '';
+  words.filter(w => w.start >= startMs && w.end <= endMs).forEach(w => {
+    const safe = sanitizeCaptionText(w.text);
+    if (safe) events += `Dialogue: 0,${ms2ass(w.start - startMs)},${ms2ass(w.end - startMs)},Default,,0,0,0,,${safe.toUpperCase()}\n`;
+  });
+  return ASS_HEADER + events;
+}
+
+// ─── THE PROXY URL GENERATOR ──────────────────────────────────────────
+async function getStreamUrl(videoUrl, isAudio) {
+  const payload = { 
+    url: videoUrl, 
+    videoQuality: "1080", 
+    downloadMode: isAudio ? "audio" : "auto" 
+  };
+  if (isAudio) payload.audioFormat = "mp3";
+
+  const headers = { 'Accept': 'application/json', 'Content-Type': 'application/json' };
+  
+  // High-capacity stable proxy nodes
+  const instances = [
+    'https://api.cobalt.tools',
+    'https://co.wuk.sh'
+  ];
+
+  for (const instance of instances) {
+    try {
+      const res = await axios.post(instance, payload, { headers, timeout: 20000 });
+      if (res.data && res.data.url) return res.data.url;
+    } catch (e) { continue; }
+  }
+  throw new Error("Tunnels are currently syncing. Please wait a minute and try again.");
+}
+
+async function downloadToDisk(url, dest) {
+  const writer = fs.createWriteStream(dest);
+  const response = await axios({ url, method: 'GET', responseType: 'stream', timeout: 60000 });
+  response.data.pipe(writer);
+  return new Promise((resolve, reject) => {
+    writer.on('finish', resolve);
+    writer.on('error', reject);
+  });
+}
+
 app.post('/api/process-video', async (req, res) => {
   const { url: originalUrl } = req.body;
   const id = Date.now();
-  const audioPath = `/tmp/a_${id}.mp3`, videoRaw = `/tmp/v_${id}.mp4`, outputDir = path.join(__dirname, 'outputs');
+  const audioPath = `/tmp/a_${id}.mp3`, outputDir = path.join(__dirname, 'outputs');
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
   try {
-    // Phase 1: High-Speed Audio Extraction
-    console.log('⬇️ Extracting Audio Pipeline...');
-    await execAsync(`"${ytDlpBin}" --force-ipv6 --extractor-args "youtube:player_client=android_vr" -f "bestaudio" -x --audio-format mp3 -o "${audioPath}" "${originalUrl}"`);
-
-    // Phase 2: AI Transcription
-    console.log('🎙️ AI Transcription Started...');
+    // 1. Download only the tiny Audio file for AI Analysis
+    console.log('⬇️ Fetching Audio Track...');
+    const aUrl = await getStreamUrl(originalUrl, true);
+    await downloadToDisk(aUrl, audioPath);
+    
+    // 2. AI Transcription
+    console.log('🎙️ AI Analyzing Viral Moments...');
     const { data: up } = await axios.post('https://api.assemblyai.com/v2/upload', fs.readFileSync(audioPath), {
-      headers: { authorization: process.env.ASSEMBLY_AI_API_KEY, 'Content-Type': 'application/octet-stream' }, maxBodyLength: Infinity
+      headers: { authorization: process.env.ASSEMBLY_AI_API_KEY, 'Content-Type': 'application/octet-stream' }
     });
-    const { data: tr } = await axios.post('https://api.assemblyai.com/v2/transcript', { audio_url: up.upload_url, auto_highlights: true }, { headers: { authorization: process.env.ASSEMBLY_AI_API_KEY } });
+    const { data: tr } = await axios.post('https://api.assemblyai.com/v2/transcript', { 
+        audio_url: up.upload_url, 
+        auto_highlights: true 
+    }, { headers: { authorization: process.env.ASSEMBLY_AI_API_KEY } });
+    
     const transcript = await waitForTranscript(tr.id);
 
-    // Phase 3: High-Quality 1080p Video Fetch
-    console.log('⬇️ Fetching High-Quality 1080p Source...');
-    // This command targets 1080p specifically but allows fallbacks if 1080p isn't available
-    await execAsync(`"${ytDlpBin}" --force-ipv6 --extractor-args "youtube:player_client=android_vr" -f "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 -o "${videoRaw}" "${originalUrl}"`);
+    // 3. THE SNIPER TRICK: We get the video URL but DO NOT download it to the server!
+    console.log('⬇️ Connecting to 1080p Video Stream...');
+    const vUrl = await getStreamUrl(originalUrl, false);
 
     const highlights = (transcript.auto_highlights_result?.results || []).slice(0, 3);
     const clips = [];
 
-    // Phase 4: Pro-Grade Rendering
-    console.log('🎬 Rendering Pro-Quality Clips...');
+    // 4. Network Stream Rendering
+    console.log('🎬 Snipping 30s clips directly from the internet...');
     for (let i = 0; i < highlights.length; i++) {
       const h = highlights[i];
       const start = Math.max(0, h.timestamps[0].start / 1000);
       const outName = `clip_${id}_${i}.mp4`;
       const outPath = path.join(outputDir, outName);
+      
+      const ass = `/tmp/c_${id}_${i}.ass`;
+      fs.writeFileSync(ass, generateClipASS(transcript.words || [], start * 1000, (start + 30) * 1000));
 
-      // High-Quality Encode Settings (CRF 20 is "near lossless")
-      await execAsync(`"${ffmpegBin}" -ss ${start} -i "${videoRaw}" -t 30 -vf "crop=ih*9/16:ih,scale=1080:1920" -c:v libx264 -preset medium -crf 20 -c:a aac -b:a 192k -y "${outPath}"`);
+      // By putting -ss BEFORE -i, FFmpeg only downloads the exact 30 seconds we need over the network!
+      const vf = `crop=ih*9/16:ih,scale=1080:1920,subtitles='${ass}':fontsdir='${path.join(__dirname, 'fonts')}'`;
+      await execAsync(`"${ffmpegBin}" -ss ${start} -i "${vUrl}" -t 30 -vf "${vf}" -c:v libx264 -preset veryfast -crf 24 -c:a aac -y "${outPath}"`, { timeout: 300000 });
       
       clips.push({ clipUrl: `/outputs/${outName}`, text: h.text });
     }
 
+    // Cleanup Audio
+    if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
+
     res.json({ status: 'success', clips });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ status: 'error', message: "Download blocked or video too heavy for current server limits." });
+    res.status(500).json({ status: 'error', message: err.message });
   }
 });
 
-app.listen(process.env.PORT || 5000, () => console.log('ViralClip Pro Engine Live'));
+app.post('/api/download-history', (req, res) => {
+  const file = path.join(__dirname, 'outputs', path.basename(req.body.clipUrl));
+  if (fs.existsSync(file)) res.download(file);
+  else res.status(404).send('Not found');
+});
+
+app.listen(process.env.PORT || 5000, () => console.log('ViralClip Sniper Engine Ready'));
