@@ -135,7 +135,7 @@ const ENCODE_QUALITY = {
 
 const FONT_DIR = path.join(__dirname, 'fonts');
 
-// ─── THE TITANIUM DOWNLOADER WITH FILE SIZE VALIDATION ───────────────────
+// ─── THE TITANIUM DOWNLOADER WITH V7 COBALT & SIZE VALIDATION ────────────
 async function robustDownload(url, outputStr, isAudio) {
   const actualOutput = outputStr.replace('.%(ext)s', isAudio ? '.mp3' : '.mp4');
   
@@ -144,8 +144,8 @@ async function robustDownload(url, outputStr, isAudio) {
     : '-f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --merge-output-format mp4';
 
   const strategies = [
-    `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" --force-ipv4 --extractor-args "youtube:player_client=android_creator,tv" ${formatArg} --no-check-certificate --no-playlist -o "${outputStr}" "${url}"`,
-    `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" --force-ipv4 --extractor-args "youtube:player_client=ios,web" ${formatArg} --no-check-certificate --no-playlist -o "${outputStr}" "${url}"`
+    `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" --extractor-args "youtube:player_client=ios,web" ${formatArg} --no-check-certificate --no-playlist -o "${outputStr}" "${url}"`,
+    `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" --extractor-args "youtube:player_client=android_creator,tv" ${formatArg} --no-check-certificate --no-playlist -o "${outputStr}" "${url}"`
   ];
 
   for (let i = 0; i < strategies.length; i++) {
@@ -157,12 +157,12 @@ async function robustDownload(url, outputStr, isAudio) {
          if (files.length > 0) {
              const downloadedFile = path.join('/tmp/', files[0]);
              const stats = fs.statSync(downloadedFile);
-             if (stats.size > 50000) { // Must be larger than 50KB to prove it's not a fake HTML error page
+             if (stats.size > 50000) { // Must be larger than 50KB to prove it's a real file
                  if (downloadedFile !== actualOutput) fs.renameSync(downloadedFile, actualOutput);
                  console.log(`  ✅ Native Strategy ${i+1} Succeeded!`);
                  return;
              } else {
-                 console.log(`  ⚠️ File too small (fake file). Trashing...`);
+                 console.log(`  ⚠️ File too small. Trashing fake file...`);
                  fs.unlinkSync(downloadedFile);
              }
          }
@@ -172,18 +172,27 @@ async function robustDownload(url, outputStr, isAudio) {
   }
 
   console.log(`  ⚠️ Native blocked. Deploying Cobalt V7 Master Nodes...`);
-  const payload = {
-      url: url,
-      downloadMode: isAudio ? "audio" : "auto",
-      videoQuality: "1080"
-  };
+  
+  // FIXED: Converted payload to strictly follow the new V7 formatting
+  const payload = isAudio 
+      ? { url: url, isAudioOnly: true, audioFormat: "mp3" }
+      : { url: url, videoQuality: "1080", isAudioOnly: false };
+
   const headers = {
       'Accept': 'application/json',
       'Content-Type': 'application/json',
+      'Origin': 'https://cobalt.tools',
+      'Referer': 'https://cobalt.tools/',
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
   };
   
-  const instances = ['https://api.cobalt.tools', 'https://co.wuk.sh', 'https://cobalt.owo.network'];
+  const instances = [
+      'https://co.wuk.sh/api/json',
+      'https://cobalt.owo.network/api/json',
+      'https://api.cobalt.tools/api/json',
+      'https://cobalt-api.kwiatekm.dev/api/json'
+  ];
+
   for (let instance of instances) {
        try {
            console.log(`  ▶️ Pinging Node: ${instance}...`);
@@ -193,10 +202,12 @@ async function robustDownload(url, outputStr, isAudio) {
                if (fs.existsSync(actualOutput) && fs.statSync(actualOutput).size > 50000) {
                    console.log(`  ✅ Ghost Node Succeeded!`);
                    return;
+               } else {
+                   if (fs.existsSync(actualOutput)) fs.unlinkSync(actualOutput);
                }
            }
        } catch(e) {
-           console.log(`  ⚠️ Ghost Node Failed.`);
+           console.log(`  ⚠️ Ghost Node Failed:`, e.response ? e.response.status : e.message);
        }
   }
 
@@ -400,3 +411,4 @@ function startServer(attempt = 1) {
   });
 }
 startServer();
+                             
