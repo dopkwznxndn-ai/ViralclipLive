@@ -33,10 +33,9 @@ const upload = multer({
 
 const execAsync = promisify(exec);
 const ytDlpBin  = path.join(__dirname, 'yt-dlp');
-const COOKIE_FILE = path.join(__dirname, 'cookies.txt');
 
 try {
-  console.log('🔄 Force-downloading the absolute latest yt-dlp binary from GitHub...');
+  console.log('🔄 Force-downloading the absolute latest yt-dlp binary...');
   execSync(`curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "${ytDlpBin}"`);
   fs.chmodSync(ytDlpBin, '755');
   console.log('✅ yt-dlp updated and permissions granted!');
@@ -130,6 +129,40 @@ const ENCODE_QUALITY = {
 
 const FONT_DIR = path.join(__dirname, 'fonts');
 
+// ─── THE MULTI-MATRIX IPV6 DOWNLOADER ──────────────────────────────────────
+async function robustYtDlp(url, outputStr, isAudio) {
+  const formatArg = isAudio 
+    ? '-f "bestaudio/best" -x --audio-format mp3' 
+    : '-f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --merge-output-format mp4';
+
+  const networks = ['--force-ipv6', '--force-ipv4'];
+  const clients = ['tv', 'ios', 'android_creator', 'web'];
+  const actualOutput = outputStr.replace('.%(ext)s', isAudio ? '.mp3' : '.mp4');
+
+  for (const net of networks) {
+    for (const client of clients) {
+      try {
+        console.log(`  ▶️ Attempting Matrix Bypass: ${net} routing with [${client}] client...`);
+        
+        await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" --rm-cache-dir ${net} --extractor-args "youtube:player_client=${client}" ${formatArg} --no-check-certificate --no-playlist -o "${outputStr}" "${url}"`, { timeout: 180000 });
+
+        let files = fs.readdirSync('/tmp/').filter(f => f.startsWith(path.basename(outputStr).split('.')[0]));
+        if (files.length > 0) {
+             const downloadedFile = path.join('/tmp/', files[0]);
+             if (fs.statSync(downloadedFile).size > 50000) { 
+                 if (downloadedFile !== actualOutput) fs.renameSync(downloadedFile, actualOutput);
+                 console.log(`  ✅ Success! Bypassed YouTube using ${net} + ${client} disguise.`);
+                 return;
+             }
+        }
+      } catch (e) {
+         console.log(`  ⚠️ Matrix ${client} block detected. Cycling to next disguise...`);
+      }
+    }
+  }
+  throw new Error("All IPv6/IPv4 network routes and client combinations failed. YouTube is severely blocking this server IP.");
+}
+
 app.post('/api/process-video', async (req, res) => {
   const originalUrl  = req.body.url;
   const userPlan     = (req.body.plan || 'free').trim();
@@ -148,14 +181,8 @@ app.post('/api/process-video', async (req, res) => {
   const cleanup  = () => tmpFiles.forEach(f => { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {} });
 
   try {
-    const cookieArg = fs.existsSync(COOKIE_FILE) ? `--cookies "${COOKIE_FILE}"` : '';
-    if (!cookieArg) console.log("⚠️ WARNING: cookies.txt not found! Downloads will likely be blocked by YouTube.");
-
-    // THE HOLY GRAIL BYPASS: MWEB/TV Client + Cache Wipe
-    const baseArgs = `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" --rm-cache-dir ${cookieArg} --extractor-args "youtube:player_client=mweb,tv" --no-check-certificate --no-playlist`;
-
-    console.log('⬇️ Executing MWEB/TV Cookie Audio Fetch...');
-    await execAsync(`${baseArgs} -f "bestaudio/best" -x --audio-format mp3 -o "/tmp/audio_${id}.%(ext)s" "${originalUrl}"`, { timeout: 120000 });
+    console.log('⬇️ Executing Matrix Audio Fetch...');
+    await robustYtDlp(originalUrl, `/tmp/audio_${id}.%(ext)s`, true);
     
     console.log('⬆️ Uploading to AssemblyAI...');
     const audioData = fs.readFileSync(audioPath);
@@ -197,8 +224,8 @@ app.post('/api/process-video', async (req, res) => {
 
     if (top5.length === 0) top5.push({ text: 'Highlight', rank: 0, start: 0, end: 30000, paddedStart: 0 });
 
-    console.log('⬇️ Executing MWEB/TV Cookie Video Fetch...');
-    await execAsync(`${baseArgs} -f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --merge-output-format mp4 -o "${videoRaw}" "${originalUrl}"`, { timeout: 300000 });
+    console.log('⬇️ Executing Matrix Video Fetch...');
+    await robustYtDlp(originalUrl, videoRaw, false);
 
     const clips = [];
     console.log('🎬 Rendering clips...');
@@ -333,4 +360,4 @@ function startServer(attempt = 1) {
   });
 }
 startServer();
-  
+                                                                 
