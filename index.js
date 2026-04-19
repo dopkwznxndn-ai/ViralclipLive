@@ -51,7 +51,7 @@ function generateClipASS(words, startMs, endMs) {
   return ASS_HEADER + events;
 }
 
-// ─── THE PROXY URL GENERATOR ──────────────────────────────────────────
+// ─── THE CORRECTED PROXY URL GENERATOR ────────────────────────────────
 async function getStreamUrl(videoUrl, isAudio) {
   const payload = { 
     url: videoUrl, 
@@ -60,19 +60,30 @@ async function getStreamUrl(videoUrl, isAudio) {
   };
   if (isAudio) payload.audioFormat = "mp3";
 
-  const headers = { 'Accept': 'application/json', 'Content-Type': 'application/json' };
+  // Added necessary Headers so Cobalt knows we aren't a malicious bot
+  const headers = { 
+    'Accept': 'application/json', 
+    'Content-Type': 'application/json',
+    'Origin': 'https://cobalt.tools',
+    'Referer': 'https://cobalt.tools/',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+  };
   
-  // High-capacity stable proxy nodes
+  // FIXED: Added the required /api/json endpoint to the URLs
   const instances = [
-    'https://api.cobalt.tools',
-    'https://co.wuk.sh'
+    'https://api.cobalt.tools/api/json',
+    'https://co.wuk.sh/api/json',
+    'https://cobalt.owo.network/api/json'
   ];
 
   for (const instance of instances) {
     try {
-      const res = await axios.post(instance, payload, { headers, timeout: 20000 });
+      const res = await axios.post(instance, payload, { headers, timeout: 25000 });
       if (res.data && res.data.url) return res.data.url;
-    } catch (e) { continue; }
+    } catch (e) { 
+      console.log(`Bypassing busy instance:`, e.message);
+      continue; 
+    }
   }
   throw new Error("Tunnels are currently syncing. Please wait a minute and try again.");
 }
@@ -111,7 +122,7 @@ app.post('/api/process-video', async (req, res) => {
     
     const transcript = await waitForTranscript(tr.id);
 
-    // 3. THE SNIPER TRICK: We get the video URL but DO NOT download it to the server!
+    // 3. THE SNIPER TRICK: Get the video URL but DO NOT download it to the server!
     console.log('⬇️ Connecting to 1080p Video Stream...');
     const vUrl = await getStreamUrl(originalUrl, false);
 
@@ -129,16 +140,14 @@ app.post('/api/process-video', async (req, res) => {
       const ass = `/tmp/c_${id}_${i}.ass`;
       fs.writeFileSync(ass, generateClipASS(transcript.words || [], start * 1000, (start + 30) * 1000));
 
-      // By putting -ss BEFORE -i, FFmpeg only downloads the exact 30 seconds we need over the network!
+      // FFmpeg pulls the exact 30 seconds directly from the network stream
       const vf = `crop=ih*9/16:ih,scale=1080:1920,subtitles='${ass}':fontsdir='${path.join(__dirname, 'fonts')}'`;
       await execAsync(`"${ffmpegBin}" -ss ${start} -i "${vUrl}" -t 30 -vf "${vf}" -c:v libx264 -preset veryfast -crf 24 -c:a aac -y "${outPath}"`, { timeout: 300000 });
       
       clips.push({ clipUrl: `/outputs/${outName}`, text: h.text });
     }
 
-    // Cleanup Audio
     if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
-
     res.json({ status: 'success', clips });
   } catch (err) {
     console.error(err);
