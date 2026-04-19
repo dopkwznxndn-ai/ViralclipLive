@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-const { exec } = require('child_process');
+const { exec, execSync } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
@@ -36,24 +36,14 @@ const execAsync = promisify(exec);
 const ytDlpBin  = path.join(__dirname, 'yt-dlp');
 const COOKIE_FILE = path.join(__dirname, 'cookies.txt');
 
+// ─── THE NUKE: Force-download the absolute newest yt-dlp binary ────────────
 try {
-  if (fs.existsSync(ytDlpBin)) {
-    fs.chmodSync(ytDlpBin, '755');
-    console.log('✅ Render Fix: yt-dlp execute permissions granted');
-    
-    console.log('🔄 Auto-updating yt-dlp to beat YouTube changes...');
-    try {
-       // Using standard exec to avoid the duplicate execSync import crash
-       exec(`"${ytDlpBin}" -U`, (err, stdout, stderr) => {
-           if (err) console.log('⚠️ yt-dlp update skipped:', err.message);
-           else console.log('✅ yt-dlp update status:', stdout.trim());
-       });
-    } catch (updErr) {
-       console.log('⚠️ yt-dlp update error:', updErr.message);
-    }
-  }
+  console.log('🔄 Force-downloading the bleeding-edge yt-dlp binary from GitHub...');
+  execSync(`curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "${ytDlpBin}"`);
+  fs.chmodSync(ytDlpBin, '755');
+  console.log('✅ yt-dlp forcefully updated and permissions granted!');
 } catch (e) {
-  console.warn('⚠️ Render Fix Warning:', e.message);
+  console.error('⚠️ Failed to forcefully update yt-dlp:', e.message);
 }
 
 const app = express();
@@ -148,6 +138,29 @@ const ENCODE_QUALITY = {
 
 const FONT_DIR = path.join(__dirname, 'fonts');
 
+// ─── THE TRIPLE-BYPASS DOWNLOADER ──────────────────────────────────────────
+async function robustDownload(url, output, isAudio) {
+  const formatArg = isAudio 
+    ? '-f "bestaudio/best" -x --audio-format mp3' 
+    : '-f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --merge-output-format mp4';
+
+  const cookieArg = fs.existsSync(COOKIE_FILE) ? `--cookies "${COOKIE_FILE}"` : '';
+
+  // Strategy 1: Use cookies (Might fail if it's a brand account)
+  const cmd1 = `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" ${cookieArg} ${formatArg} --no-check-certificate --no-playlist -o "${output}" "${url}"`;
+
+  // Strategy 2: Drop cookies, disguise as iOS/TV (Bypasses Data Sync ID errors)
+  const cmd2 = `"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" --extractor-args "youtube:player_client=ios,tv" ${formatArg} --no-check-certificate --no-playlist -o "${output}" "${url}"`;
+
+  try {
+    console.log(`  ▶️ Attempting Strategy 1 (Cookies)...`);
+    await execAsync(cmd1, { timeout: 300000 });
+  } catch (err1) {
+    console.log(`  ⚠️ Strategy 1 Failed. Launching Strategy 2 (iOS Disguise)...`);
+    await execAsync(cmd2, { timeout: 300000 });
+  }
+}
+
 app.post('/api/process-video', async (req, res) => {
   const originalUrl  = req.body.url;
   const userPlan     = (req.body.plan || 'free').trim();
@@ -166,9 +179,14 @@ app.post('/api/process-video', async (req, res) => {
   const cleanup  = () => tmpFiles.forEach(f => { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {} });
 
   try {
-    console.log('⬇️ Downloading audio (with cookies, android disguise removed)...');
-    const cookieArg = fs.existsSync(COOKIE_FILE) ? `--cookies "${COOKIE_FILE}"` : '';
-    await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" ${cookieArg} -f "bestaudio/best" -x --audio-format mp3 --no-check-certificate --no-playlist -o "/tmp/audio_${id}.%(ext)s" "${originalUrl}"`, { timeout: 120000 });
+    console.log('⬇️ Executing Audio Download Phase...');
+    await robustDownload(originalUrl, `/tmp/audio_${id}.%(ext)s`, true);
+    
+    // Rename fallback in case yt-dlp ignores the specific extension output
+    if (!fs.existsSync(audioPath)) {
+       const potentialFiles = fs.readdirSync('/tmp/').filter(f => f.startsWith(`audio_${id}`));
+       if (potentialFiles.length > 0) fs.renameSync(path.join('/tmp/', potentialFiles[0]), audioPath);
+    }
 
     console.log('⬆️ Uploading to AssemblyAI...');
     const audioData = fs.readFileSync(audioPath);
@@ -210,10 +228,10 @@ app.post('/api/process-video', async (req, res) => {
 
     if (top5.length === 0) top5.push({ text: 'Highlight', rank: 0, start: 0, end: 30000, paddedStart: 0 });
 
-    console.log('⬇️ Downloading video (with cookies, android disguise removed)...');
-    await execAsync(`"${ytDlpBin}" --ffmpeg-location "${ffmpegBin}" ${cookieArg} -f "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --format-sort "res,fps,vcodec:vp9.2,vcodec:vp9,vcodec:h265,vcodec:h264,filesize" --no-check-certificate --no-playlist --merge-output-format mp4 -o "${videoRaw}" "${originalUrl}"`, { timeout: 300000 });
+    console.log('⬇️ Executing Video Download Phase...');
+    await robustDownload(originalUrl, videoRaw, false);
 
-    if (!fs.existsSync(videoRaw) || fs.statSync(videoRaw).size === 0) throw new Error('Source video missing!');
+    if (!fs.existsSync(videoRaw) || fs.statSync(videoRaw).size === 0) throw new Error('Source video missing after multiple fallback attempts!');
 
     const clips = [];
     console.log('🎬 Rendering clips...');
@@ -334,7 +352,7 @@ app.post('/api/upload-and-convert', upload.single('video'), async (req, res) => 
   } catch (err) { cleanup(); if (!res.headersSent) res.status(500).json({ error: err.message }); }
 });
 
-const { execSync } = require('child_process');
+const { execSync: processExecSync } = require('child_process');
 const PORT = process.env.PORT || 5000;
 
 function startServer(attempt = 1) {
@@ -342,10 +360,10 @@ function startServer(attempt = 1) {
   const server = app.listen(PORT, '0.0.0.0', () => console.log('ViralClip AI Master Server is LIVE! Port:', PORT));
   server.on('error', err => {
     if (err.code === 'EADDRINUSE') {
-      try { execSync('pkill -f "node index.js" || true'); } catch (_) {}
+      try { processExecSync('pkill -f "node index.js" || true'); } catch (_) {}
       setTimeout(() => startServer(attempt + 1), 1500);
     }
   });
 }
 startServer();
-                         
+         
