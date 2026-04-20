@@ -51,62 +51,41 @@ function generateClipASS(words, startMs, endMs) {
   return ASS_HEADER + events;
 }
 
-function extractVideoId(url) {
-  const match = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/)|youtu\.be\/)([^"&?\/\s]{11})/);
-  return match ? match[1] : null;
-}
+// ─── THE BULLETPROOF NETWORK STREAMER ───────────────────────────────
+async function getBulletproofStream(videoUrl, isAudio) {
+  const payload = isAudio ? 
+    { url: videoUrl, downloadMode: "audio", audioFormat: "mp3" } : 
+    { url: videoUrl, videoQuality: "1080" };
 
-// ─── THE HYDRA STREAM EXTRACTOR ─────────────────────────────────────────
-async function getHydraStream(originalUrl, isAudio) {
-  const videoId = extractVideoId(originalUrl);
+  // Fixed instances with the CORRECT /api/json endpoint
+  const instances = [
+    'https://api.cobalt.tools/api/json',
+    'https://co.wuk.sh/api/json',
+    'https://cobalt.owo.network/api/json'
+  ];
 
-  // HEAD 1: Cobalt V7 API (Official)
-  try {
-    console.log(`  ▶️ Attempting Head 1: Cobalt...`);
-    const payload = isAudio ? { url: originalUrl, downloadMode: "audio", audioFormat: "mp3" } : { url: originalUrl, videoQuality: "1080" };
-    const res = await axios.post('https://api.cobalt.tools/', payload, { 
-      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'Origin': 'https://cobalt.tools', 'User-Agent': 'Mozilla/5.0' },
-      timeout: 10000
-    });
-    if (res.data && res.data.url) return res.data.url;
-  } catch (e) { console.log(`  ⚠️ Cobalt blocked.`); }
-
-  // HEAD 2: Piped API
-  try {
-    console.log(`  ▶️ Attempting Head 2: Piped...`);
-    const res = await axios.get(`https://pipedapi.kavin.rocks/streams/${videoId}`, { timeout: 10000 });
-    if (res.data) {
-       if (isAudio) {
-          const audio = res.data.audioStreams.find(s => s.mimeType.includes('mp4a')) || res.data.audioStreams[0];
-          return audio.url;
-       } else {
-          const video = res.data.videoStreams.find(s => s.quality === '1080p' && s.videoOnly) || res.data.videoStreams.find(s => s.quality === '720p' && s.videoOnly) || res.data.videoStreams[0];
-          return video.url;
-       }
+  for (const instance of instances) {
+    try {
+      console.log(`  ▶️ Pinging API: ${instance}...`);
+      const res = await axios.post(instance, payload, {
+        headers: { 
+          'Accept': 'application/json', 
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        },
+        timeout: 15000
+      });
+      if (res.data && res.data.url) {
+        console.log(`  ✅ Successfully linked to ${instance}`);
+        return res.data.url;
+      }
+    } catch (e) {
+      // Un-masking the error so we see exactly what went wrong if it fails
+      const errMsg = e.response ? `HTTP ${e.response.status}` : e.message;
+      console.log(`  ⚠️ Proxy Failed (${instance}): ${errMsg}`);
     }
-  } catch(e) { console.log(`  ⚠️ Piped blocked.`); }
-
-  // HEAD 3: Invidious Decentralized Network
-  try {
-    console.log(`  ▶️ Attempting Head 3: Invidious...`);
-    const instances = ['https://vid.puffyan.us', 'https://invidious.jing.rocks', 'https://invidious.nerdvpn.de'];
-    for (let inst of instances) {
-       try {
-           const res = await axios.get(`${inst}/api/v1/videos/${videoId}`, { timeout: 10000 });
-           if (res.data) {
-               if (isAudio) {
-                   const audio = res.data.adaptiveFormats.find(f => f.type.includes('audio/mp4')) || res.data.adaptiveFormats.find(f => f.type.includes('audio'));
-                   return audio.url;
-               } else {
-                   const video = res.data.adaptiveFormats.find(f => f.resolution === '1080p' && f.type.includes('video/mp4')) || res.data.adaptiveFormats.find(f => f.resolution === '720p' && f.type.includes('video/mp4')) || res.data.formatStreams[0];
-                   return video.url;
-               }
-           }
-       } catch (err) { continue; }
-    }
-  } catch(e) { console.log(`  ⚠️ Invidious blocked.`); }
-
-  throw new Error("YouTube has temporarily blocked all global proxies from accessing this specific video. Try a different YouTube link!");
+  }
+  throw new Error("All proxy servers rejected the request. Please check Render logs for exact HTTP status codes.");
 }
 
 async function downloadToDisk(url, dest) {
@@ -121,16 +100,13 @@ async function downloadToDisk(url, dest) {
 
 app.post('/api/process-video', async (req, res) => {
   const { url: originalUrl } = req.body;
-  
-  if (!extractVideoId(originalUrl)) return res.status(400).json({ status: 'error', message: 'Invalid YouTube link.' });
-
   const id = Date.now();
   const audioPath = `/tmp/a_${id}.mp3`, outputDir = path.join(__dirname, 'outputs');
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
   try {
-    console.log('⬇️ Fetching Audio via Hydra Engine...');
-    const aUrl = await getHydraStream(originalUrl, true);
+    console.log('⬇️ Fetching Audio Stream...');
+    const aUrl = await getBulletproofStream(originalUrl, true);
     await downloadToDisk(aUrl, audioPath);
     
     console.log('🎙️ AI Analyzing Transcript...');
@@ -144,13 +120,13 @@ app.post('/api/process-video', async (req, res) => {
     
     const transcript = await waitForTranscript(tr.id);
     
-    console.log('⬇️ Fetching 1080p Video via Hydra Engine...');
-    const vUrl = await getHydraStream(originalUrl, false);
+    console.log('⬇️ Securing 1080p Video Stream...');
+    const vUrl = await getBulletproofStream(originalUrl, false);
 
     const highlights = (transcript.auto_highlights_result?.results || []).slice(0, 3);
     const clips = [];
 
-    console.log('🎬 Snipping directly from network stream...');
+    console.log('🎬 Snipping directly from 1080p network stream...');
     for (let i = 0; i < highlights.length; i++) {
       const h = highlights[i];
       const start = Math.max(0, h.timestamps[0].start / 1000);
@@ -160,7 +136,7 @@ app.post('/api/process-video', async (req, res) => {
       const ass = `/tmp/c_${id}_${i}.ass`;
       fs.writeFileSync(ass, generateClipASS(transcript.words || [], start * 1000, (start + 30) * 1000));
 
-      // Dual-Stream Direct Network FFmpeg
+      // Snipping over the network
       const vf = `crop=ih*9/16:ih,scale=1080:1920,subtitles='${ass}':fontsdir='${path.join(__dirname, 'fonts')}'`;
       await execAsync(`"${ffmpegBin}" -ss ${start} -i "${vUrl}" -ss ${start} -i "${aUrl}" -t 30 -vf "${vf}" -c:v libx264 -preset veryfast -crf 24 -c:a aac -y "${outPath}"`, { timeout: 300000 });
       
@@ -181,4 +157,4 @@ app.post('/api/download-history', (req, res) => {
   else res.status(404).send('Not found');
 });
 
-app.listen(process.env.PORT || 5000, () => console.log('ViralClip Hydra Engine Ready'));
+app.listen(process.env.PORT || 5000, () => console.log('ViralClip Master Engine Ready'));
